@@ -187,3 +187,19 @@ screenshots/**/*
 screenshots/*.png
 screenshots/*.jpg
 screenshots/*.jpeg
+
+# ETH-XGaze model dosyaları ve ilgili kaynaklar
+models/*.pth
+models/*.pth.tar
+models/*.onnx
+models/pretrained/
+ETH-XGaze/
+*.pth
+*.pth.tar
+*.onnx
+
+# Model dosyaları (büyük dosyalar)
+models/*.bin
+models/*.tflite
+models/*.pb
+models/*.h5
