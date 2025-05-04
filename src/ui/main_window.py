@@ -30,6 +30,9 @@ from src.ui.widgets import IndicatorWidget
 # Import utils
 from src.utils.mediapipe_utils import load_ui_config, MediaPipeUtils
 
+# Import GazeEstimator
+from src.detection.gaze_estimator import GazeEstimator
+
 
 class DriverDrowsinessMainWindow(QMainWindow):
     """
@@ -55,7 +58,10 @@ class DriverDrowsinessMainWindow(QMainWindow):
         # Initialize MediaPipe
         self.mediapipe_utils = None
         
-        # Flag to control landmark visibility
+        # Initialize GazeEstimator
+        self.gaze_estimator = None
+        
+        # Flag to control landmark and gaze visibility
         self.show_landmarks = False
         
         # Create camera timer for video updates
@@ -320,7 +326,7 @@ class DriverDrowsinessMainWindow(QMainWindow):
         )
         gaze_layout.setSpacing(5)  # Azaltılmış boşluk
         
-        gaze_title = QLabel("Gaze Direction")
+        gaze_title = QLabel("Göz Bakış Yönü")
         gaze_title.setFont(QFont(
             self.config['fonts']['family'],
             self.config['fonts']['label_size'],
@@ -328,12 +334,18 @@ class DriverDrowsinessMainWindow(QMainWindow):
         ))
         gaze_layout.addWidget(gaze_title)
         
-        # Her bir koordinat için ayrı label
-        self.gaze_x_label = QLabel("X: 0.00")
-        self.gaze_y_label = QLabel("Y: 0.00")
-        self.gaze_z_label = QLabel("Z: 0.00")
+        # Create form layout for gaze direction values
+        form_widget = QWidget()
+        self.gaze_group_layout = QFormLayout(form_widget)
+        self.gaze_group_layout.setContentsMargins(0, 0, 0, 0)
+        self.gaze_group_layout.setSpacing(3)  # Reduced spacing
         
-        # Daha küçük font
+        # Create labels for each coordinate
+        self.gaze_x_label = QLabel("0.00")
+        self.gaze_y_label = QLabel("0.00")
+        self.gaze_z_label = QLabel("0.00")
+        
+        # Smaller font
         smaller_font = QFont(
             self.config['fonts']['family'],
             self.config['fonts']['label_size'] - 1
@@ -342,17 +354,38 @@ class DriverDrowsinessMainWindow(QMainWindow):
         self.gaze_y_label.setFont(smaller_font)
         self.gaze_z_label.setFont(smaller_font)
         
-        # Stil ayarları
-        self.gaze_x_label.setStyleSheet("color: #ff3b30;")  # Kırmızı
-        self.gaze_y_label.setStyleSheet("color: #34c759;")  # Yeşil
-        self.gaze_z_label.setStyleSheet("color: #5856d6;")  # Mor
+        # Style settings
+        self.gaze_x_label.setStyleSheet("color: #ff3b30; font-weight: bold;")  # Red
+        self.gaze_y_label.setStyleSheet("color: #34c759; font-weight: bold;")  # Green
+        self.gaze_z_label.setStyleSheet("color: #5856d6; font-weight: bold;")  # Purple
         
-        # Etiketleri düzene ekle
-        gaze_layout.addWidget(self.gaze_x_label)
-        gaze_layout.addWidget(self.gaze_y_label)
-        gaze_layout.addWidget(self.gaze_z_label)
+        # Add labels to form layout
+        self.gaze_group_layout.addRow("X:", self.gaze_x_label)
+        self.gaze_group_layout.addRow("Y:", self.gaze_y_label)
+        self.gaze_group_layout.addRow("Z:", self.gaze_z_label)
         
-        # Widget'ı stats_layout'a ekle
+        # Add form widget to gaze layout
+        gaze_layout.addWidget(form_widget)
+        
+        # Create status and focus labels (will be populated in update_metrics)
+        self.gaze_status_label = QLabel("Merkez")
+        self.gaze_status_label.setStyleSheet("font-weight: bold; color: #00FF00;")
+        self.gaze_group_layout.addRow("Durum:", self.gaze_status_label)
+        
+        # Add angle labels
+        self.gaze_yaw_label = QLabel("0.0°")
+        self.gaze_yaw_label.setStyleSheet("font-weight: bold; color: #FF0000;")
+        self.gaze_group_layout.addRow("Yaw:", self.gaze_yaw_label)
+        
+        self.gaze_pitch_label = QLabel("0.0°")
+        self.gaze_pitch_label.setStyleSheet("font-weight: bold; color: #00FF00;")
+        self.gaze_group_layout.addRow("Pitch:", self.gaze_pitch_label)
+        
+        self.gaze_focus_label = QLabel("Yüksek")
+        self.gaze_focus_label.setStyleSheet("font-weight: bold; color: #00FF00;")
+        self.gaze_group_layout.addRow("Odak:", self.gaze_focus_label)
+        
+        # Add widget to stats_layout
         stats_layout.addWidget(gaze_widget, 3, 0)
         
         self.stats_widget = stats_widget
@@ -609,11 +642,59 @@ class DriverDrowsinessMainWindow(QMainWindow):
             max_val=self.config['chart']['y_range_perclos'][1]
         )
         
-        # Update gaze direction
+        # Update gaze direction with more descriptive information
         x, y, z = gaze_dir
-        self.gaze_x_label.setText(f"X: {x:.2f}")
-        self.gaze_y_label.setText(f"Y: {y:.2f}")
-        self.gaze_z_label.setText(f"Z: {z:.2f}")
+        
+        # Convert normalized directions to angles (in degrees)
+        yaw_angle = np.arcsin(np.clip(x, -1.0, 1.0)) * 180.0 / np.pi
+        pitch_angle = np.arcsin(np.clip(y, -1.0, 1.0)) * 180.0 / np.pi
+        
+        # Determine gaze direction in words with HTML color codes for PyQt
+        if abs(x) < 0.2 and abs(y) < 0.2:
+            gaze_status = "MERKEZE BAKIYOR"
+            status_color = "#00FF00"  # Green for center (HTML format for PyQt)
+        elif x < -0.3:
+            gaze_status = "SOLA BAKIYOR"
+            status_color = "#FFA500"  # Orange for left (HTML format for PyQt)
+        elif x > 0.3:
+            gaze_status = "SAĞA BAKIYOR"
+            status_color = "#FFA500"  # Orange for right (HTML format for PyQt)
+        elif y < -0.3:
+            gaze_status = "YUKARI BAKIYOR"
+            status_color = "#FFA500"  # Orange for up (HTML format for PyQt)
+        elif y > 0.3:
+            gaze_status = "AŞAĞI BAKIYOR"
+            status_color = "#FFA500"  # Orange for down (HTML format for PyQt)
+        else:
+            gaze_status = "MERKEZ CIVARINDA"
+            status_color = "#00FF00"  # Green for near center (HTML format for PyQt)
+            
+        # Format coordinate values
+        self.gaze_x_label.setText(f"{x:.2f}")
+        self.gaze_y_label.setText(f"{y:.2f}")
+        self.gaze_z_label.setText(f"{z:.2f}")
+        
+        # Update angle labels
+        self.gaze_yaw_label.setText(f"{yaw_angle:.1f}°")
+        self.gaze_pitch_label.setText(f"{pitch_angle:.1f}°")
+        
+        # Update the status label with colorful text
+        self.gaze_status_label.setText(gaze_status)
+        self.gaze_status_label.setStyleSheet(f"font-weight: bold; color: {status_color};")
+        
+        # Update focus assessment based on z-value (depth)
+        if z > 0.7:
+            focus_status = "Yüksek"
+            focus_color = "#00FF00"  # Green for high focus
+        elif z > 0.4:
+            focus_status = "Orta"
+            focus_color = "#FFFF00"  # Yellow for medium focus
+        else:
+            focus_status = "Düşük"
+            focus_color = "#FF0000"  # Red for low focus
+            
+        self.gaze_focus_label.setText(focus_status)
+        self.gaze_focus_label.setStyleSheet(f"font-weight: bold; color: {focus_color};")
     
     def _toggle_stats_panel(self, checked):
         """Toggle the visibility of the stats panel."""
@@ -676,6 +757,14 @@ class DriverDrowsinessMainWindow(QMainWindow):
             # Initialize MediaPipe
             self.mediapipe_utils = MediaPipeUtils()
             
+            # Initialize GazeEstimator
+            try:
+                self.gaze_estimator = GazeEstimator()
+                print("INFO: GazeEstimator başarıyla başlatıldı")
+            except Exception as e:
+                print(f"WARNING: GazeEstimator başlatılamadı: {e}")
+                self.gaze_estimator = None
+            
             # Get actual camera properties after setting
             actual_width = self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)
             actual_height = self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
@@ -730,6 +819,9 @@ class DriverDrowsinessMainWindow(QMainWindow):
             self.mediapipe_utils.release()
             self.mediapipe_utils = None
         
+        # GazeEstimator'ı temizle (herhangi bir release metodu yok, Python GC ile temizlenir)
+        self.gaze_estimator = None
+        
         # Clear the video frame
         self.video_frame.setText("Kamera görüntüsü burada gösterilecek")
         
@@ -766,6 +858,7 @@ class DriverDrowsinessMainWindow(QMainWindow):
         mar = 0.0
         perclos = 0.0
         gaze_dir = (0.0, 0.0, 0.0)
+        gaze_angles = (0.0, 0.0)  # Yaw and pitch açıları
         
         if face_detected:
             # Get eye landmarks
@@ -782,6 +875,9 @@ class DriverDrowsinessMainWindow(QMainWindow):
             
             # Use landmarks directly for MAR calculation
             mar = self.mediapipe_utils.get_mouth_aspect_ratio(landmarks)
+            
+            # Calculate gaze direction
+            gaze_dir = self.mediapipe_utils.get_eye_gaze_direction(landmarks)
             
             # Update PERCLOS
             is_eye_closed = ear < self.config.get('detection', {}).get('ear_threshold', 0.21)
@@ -836,42 +932,47 @@ class DriverDrowsinessMainWindow(QMainWindow):
                     connection_thickness=1
                 )
                 
-                # Add status text
-                # Determine status text and color
-                if is_eye_closed:
-                    eye_status = "CLOSED"
-                    eye_color = (0, 0, 255)  # Red for closed
+                # Eğer GazeEstimator etkinse daha doğru bakış tahmini yap
+                if self.gaze_estimator is not None:
+                    # GazeEstimator için landmarks_dict hazırla
+                    h, w, _ = frame.shape
+                    
+                    # MediaPipe yüz işaret noktalarını GazeEstimator için uygun formata dönüştür
+                    left_eye_indices = self.mediapipe_utils.LEFT_EYE_INDICES
+                    right_eye_indices = self.mediapipe_utils.RIGHT_EYE_INDICES
+                    
+                    # GazeEstimator'ın istediği formatta landmarks_dict oluştur
+                    landmarks_dict = {
+                        'all_landmarks': landmarks,
+                        'left_eye': np.array([[landmarks[idx][0], landmarks[idx][1]] for idx in left_eye_indices]),
+                        'right_eye': np.array([[landmarks[idx][0], landmarks[idx][1]] for idx in right_eye_indices])
+                    }
+                    
+                    # Bakış tahmini yap
+                    success, gaze_angles, normalized_face = self.gaze_estimator.detect(frame, landmarks_dict)
+                    
+                    if success:
+                        # Gaze vektörünü çiz
+                        frame = self.gaze_estimator.draw_gaze_vector(frame, landmarks_dict, gaze_angles, length=100, thickness=2, color=(0, 0, 255))
+                        
+                        # GazeEstimator'dan alınan açıları kullanarak gaze_dir güncelle
+                        # Bu, update_metrics fonksiyonunda kullanılacak
+                        yaw_rad = np.radians(gaze_angles[0])
+                        pitch_rad = np.radians(gaze_angles[1])
+                        
+                        # 3D gaze vektörü oluştur
+                        x = -np.sin(yaw_rad) * np.cos(pitch_rad)
+                        y = -np.sin(pitch_rad)
+                        z = -np.cos(yaw_rad) * np.cos(pitch_rad)
+                        gaze_dir = (x, y, z)
                 else:
-                    eye_status = "OPEN"
-                    eye_color = (0, 255, 0)  # Green for open
-                
-                if mar > self.config.get('detection', {}).get('mar_threshold', 0.65):
-                    mouth_status = "YAWNING"
-                    mouth_color = (0, 0, 255)  # Red for yawning
-                else:
-                    mouth_status = "NORMAL"
-                    mouth_color = (0, 255, 0)  # Green for normal
-                
-                # Add EAR, MAR and PERCLOS text to frame
-                ear_text = f"EAR: {ear:.2f} - {eye_status}"
-                mar_text = f"MAR: {mar:.2f} - {mouth_status}"
-                perclos_text = f"PERCLOS: {perclos:.1f}%"
-                
-                # Place text with background for better visibility
-                # Function to add text with background
-                def put_text_with_background(img, text, position, font, scale, text_color, bg_color, thickness=1):
-                    text_size, _ = cv2.getTextSize(text, font, scale, thickness)
-                    text_w, text_h = text_size
-                    cv2.rectangle(img, position, (position[0] + text_w, position[1] - text_h - 5), bg_color, -1)
-                    cv2.putText(img, text, (position[0], position[1] - 5), font, scale, text_color, thickness)
-                
-                # Add text with backgrounds
-                put_text_with_background(frame, ear_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 
-                                        0.7, eye_color, (50, 50, 50), 2)
-                put_text_with_background(frame, mar_text, (10, 65), cv2.FONT_HERSHEY_SIMPLEX, 
-                                        0.7, mouth_color, (50, 50, 50), 2)
-                put_text_with_background(frame, perclos_text, (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 
-                                        0.7, (255, 0, 0), (50, 50, 50), 2)
+                    # GazeEstimator yoksa, sadece MediaPipe ile tahmin edilen gaze'i kullan
+                    frame = self.mediapipe_utils.draw_gaze_direction_v2(
+                        frame, landmarks, gaze_dir, 
+                        arrow_color=(0, 0, 255),
+                        arrow_length=150,
+                        arrow_thickness=3
+                    )
         
         # Display the frame
         self.update_video_frame(frame)
