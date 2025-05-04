@@ -9,7 +9,6 @@ class DrowsinessLogic:
     A class to evaluate driver drowsiness based on multiple indicators:
     - EAR (Eye Aspect Ratio)
     - MAR (Mouth Aspect Ratio)
-    - Head Pose (Pitch, Yaw, Roll)
     - PERCLOS (Percentage of Eye Closure)
     - Gaze Direction
 
@@ -207,7 +206,6 @@ class DrowsinessLogic:
         return gaze_angle > self.gaze_deviation_threshold
     
     def update(self, ear: Optional[float], mar: Optional[float], 
-              head_pose: Optional[Tuple[float, float, float]], 
               perclos: Optional[float], 
               gaze_direction: Optional[Tuple[float, float, float]]) -> int:
         """
@@ -216,7 +214,6 @@ class DrowsinessLogic:
         Args:
             ear: Eye Aspect Ratio value (None if not available)
             mar: Mouth Aspect Ratio value (None if not available)
-            head_pose: Tuple of (pitch, yaw, roll) angles in degrees (None if not available)
             perclos: PERCLOS value as percentage (None if not available)
             gaze_direction: Tuple of (x, y, z) gaze direction vector (None if not available)
             
@@ -246,11 +243,9 @@ class DrowsinessLogic:
         self.prolonged_eye_closure = self._check_prolonged_eye_closure(current_time)
         self.yawning_detected = self._check_yawning(current_time)
         
-        # Head pose distraction (looking down)
-        if head_pose is not None:
-            pitch, _, _ = head_pose
-            self.head_distraction = pitch > self.forward_pitch_threshold
-            
+        # Head distraction is no longer detected using head pose
+        self.head_distraction = False
+        
         # PERCLOS-based drowsiness
         if perclos is not None:
             self.perclos_drowsy = perclos > self.perclos_threshold
@@ -262,7 +257,7 @@ class DrowsinessLogic:
         self.current_kss = self._calculate_kss()
         
         # Update debug info
-        self._update_debug_info(ear, mar, head_pose, perclos, gaze_direction)
+        self._update_debug_info(ear, mar, perclos, gaze_direction)
         
         return self.current_kss
         
@@ -296,7 +291,6 @@ class DrowsinessLogic:
         return min(score, 9)
         
     def _update_debug_info(self, ear: Optional[float], mar: Optional[float],
-                          head_pose: Optional[Tuple[float, float, float]],
                           perclos: Optional[float],
                           gaze_direction: Optional[Tuple[float, float, float]]):
         """
@@ -305,14 +299,12 @@ class DrowsinessLogic:
         Args:
             ear: Current EAR value
             mar: Current MAR value
-            head_pose: Current head pose angles
             perclos: Current PERCLOS value
             gaze_direction: Current gaze direction vector
         """
         self.debug_info = {
             "ear": ear,
             "mar": mar,
-            "head_pose": head_pose,
             "perclos": perclos,
             "gaze_direction": gaze_direction,
             "state": {

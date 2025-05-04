@@ -5,7 +5,7 @@
 Drawing utilities for the drowsiness detection system.
 
 This module contains functions for drawing visualizations on frames,
-such as facial landmarks, head pose axes, gaze vectors, and status information.
+such as facial landmarks, gaze vectors, and status information.
 """
 
 import cv2
@@ -31,58 +31,6 @@ def draw_landmarks(frame: np.ndarray, landmarks: List[List[float]],
     for landmark in landmarks:
         x, y = int(landmark[0]), int(landmark[1])
         cv2.circle(vis_frame, (x, y), radius, color, -1)
-    return vis_frame
-
-def draw_head_pose_axes(frame: np.ndarray, 
-                       rotation_vector: np.ndarray, 
-                       translation_vector: Optional[np.ndarray] = None,
-                       camera_matrix: Optional[np.ndarray] = None,
-                       dist_coeffs: Optional[np.ndarray] = None,
-                       length: float = 50.0) -> np.ndarray:
-    """
-    Draw 3D axes showing head pose orientation.
-    
-    Args:
-        frame: Input frame
-        rotation_vector: Rotation vector from solvePnP
-        translation_vector: Translation vector from solvePnP
-        camera_matrix: Camera intrinsic matrix
-        dist_coeffs: Distortion coefficients
-        length: Length of the axes
-        
-    Returns:
-        np.ndarray: Frame with visualized head pose axes
-    """
-    vis_frame = frame.copy()
-    
-    # If translation vector or camera matrix not provided, we can't draw
-    if translation_vector is None or camera_matrix is None:
-        return vis_frame
-    
-    # Define the 3D axes points
-    axis_points = np.float32([[0, 0, 0], 
-                              [length, 0, 0], 
-                              [0, length, 0], 
-                              [0, 0, length]])
-    
-    # Project the 3D points to the image plane
-    if dist_coeffs is None:
-        dist_coeffs = np.zeros((4, 1))
-    
-    imgpts, _ = cv2.projectPoints(axis_points, rotation_vector, translation_vector, 
-                                 camera_matrix, dist_coeffs)
-    
-    # Draw the axes
-    origin = tuple(imgpts[0].ravel().astype(int))
-    x_axis = tuple(imgpts[1].ravel().astype(int))
-    y_axis = tuple(imgpts[2].ravel().astype(int))
-    z_axis = tuple(imgpts[3].ravel().astype(int))
-    
-    # X-axis in red, Y-axis in green, Z-axis in blue
-    cv2.line(vis_frame, origin, x_axis, (0, 0, 255), 2)  # X-axis (red)
-    cv2.line(vis_frame, origin, y_axis, (0, 255, 0), 2)  # Y-axis (green)
-    cv2.line(vis_frame, origin, z_axis, (255, 0, 0), 2)  # Z-axis (blue)
-    
     return vis_frame
 
 def draw_gaze_vector(frame: np.ndarray, 

@@ -6,6 +6,10 @@ camera:
   height: 480
   fps: 30
   device: 0
+  # ETH-XGaze için kamera kalibrasyonu parametreleri
+  # Bunlar varsayılan değerlerdir, kameranıza göre değiştirilmelidir
+  matrix: [1000.0, 0.0, 320.0, 0.0, 1000.0, 240.0, 0.0, 0.0, 1.0]  # 3x3 kamera matrisi düzleştirilmiş halde
+  distortion: [0.0, 0.0, 0.0, 0.0, 0.0]  # 5 parametreli distorsiyon katsayıları
 
 # Algılama parametreleri
 detection:
@@ -15,12 +19,6 @@ detection:
   # MAR (Mouth Aspect Ratio) parametreleri
   mar_threshold: 0.65   # Ağzın açık sayılması için MAR eşiği
   
-  # Baş pozisyonu parametreleri
-  head_pose:
-    forward_pitch_threshold: 30.0  # İleri eğilme eşiği (derece)
-    side_yaw_threshold: 40.0       # Yana dönme eşiği (derece)
-    roll_threshold: 20.0           # Yalpalama eşiği (derece)
-  
   # PERCLOS parametreleri
   perclos:
     window_size: 150               # PERCLOS hesaplaması için çerçeve sayısı (30 fps için 5 saniye)
@@ -29,6 +27,8 @@ detection:
   # Bakış yönü parametreleri
   gaze:
     deviation_threshold: 20.0      # Bakış sapma eşiği (derece)
+    use_eth_xgaze: true            # ETH-XGaze modelini kullan
+    normalize_face: true           # Yüz normalizasyonunu etkinleştir
 
 # Uykululuk değerlendirme parametreleri
 drowsiness:
@@ -49,7 +49,6 @@ visualization:
   show_fps: true                   # FPS göstergesini göster
   show_metrics: true               # Ölçümleri göster
   show_landmarks: false            # Yüz işaretlerini göster
-  show_head_pose: true             # Baş pozisyonunu göster
   show_gaze: true                  # Bakış yönünü göster
 
 # Kullanıcı arayüzü (UI) parametreleri
