@@ -1,0 +1,529 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+MediaPipe utility functions for the drowsiness detection system.
+
+This module provides utility functions for working with MediaPipe,
+particularly for face mesh processing operations.
+"""
+
+import cv2
+import numpy as np
+import mediapipe as mp
+from typing import List, Tuple, Dict, Optional, Union
+
+class MediaPipeUtils:
+    """
+    A utility class for MediaPipe operations, particularly face mesh functionality.
+    
+    Attributes:
+        mp_face_mesh: MediaPipe FaceMesh solution
+        face_mesh: MediaPipe FaceMesh object
+    """
+    
+    # Key facial landmark indices
+    # Left eye landmarks
+    LEFT_EYE_INDICES = [362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387, 386, 385, 384, 398]
+    # Right eye landmarks
+    RIGHT_EYE_INDICES = [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246]
+    
+    # Mouth landmarks - with both outer and inner lip contours
+    # Outer lip landmarks clockwise from left corner
+    OUTER_LIP_INDICES = [61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291, 375, 321, 405, 314, 17, 84, 181, 91, 146]
+    # Inner lip landmarks clockwise from left corner
+    INNER_LIP_INDICES = [78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308, 324, 318, 402, 317, 14, 87, 178, 88, 95]
+    
+    # Combined mouth landmarks for visualization (outer + inner contour)
+    MOUTH_INDICES = OUTER_LIP_INDICES + INNER_LIP_INDICES
+    
+    # Face contour landmarks
+    FACE_CONTOUR_INDICES = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152]
+    # Nose landmarks
+    NOSE_INDICES = [168, 6, 197, 195, 5, 4, 19, 94, 2]
+    
+    def __init__(self, 
+                static_image_mode: bool = False, 
+                max_num_faces: int = 1,
+                refine_landmarks: bool = True,
+                min_detection_confidence: float = 0.5,
+                min_tracking_confidence: float = 0.5):
+        """
+        Initialize the MediaPipeUtils.
+        
+        Args:
+            static_image_mode: Whether to treat images as static (not video)
+            max_num_faces: Maximum number of faces to detect
+            refine_landmarks: Whether to refine landmarks around eyes and lips
+            min_detection_confidence: Minimum confidence for face detection
+            min_tracking_confidence: Minimum confidence for landmark tracking
+        """
+        self.mp_face_mesh = mp.solutions.face_mesh
+        self.face_mesh = self.mp_face_mesh.FaceMesh(
+            static_image_mode=static_image_mode,
+            max_num_faces=max_num_faces,
+            refine_landmarks=refine_landmarks,
+            min_detection_confidence=min_detection_confidence,
+            min_tracking_confidence=min_tracking_confidence
+        )
+    
+    def detect_face_landmarks(self, frame: np.ndarray) -> Tuple[List[List[float]], bool]:
+        """
+        Detect facial landmarks in a frame.
+        
+        Args:
+            frame: Input frame/image (BGR format)
+            
+        Returns:
+            Tuple containing:
+            - List of landmarks as [x, y, z] coordinates
+            - Boolean indicating if a face was detected
+        """
+        # Convert BGR to RGB
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        
+        # Get frame dimensions
+        h, w, _ = frame.shape
+        
+        # Process the frame
+        results = self.face_mesh.process(rgb_frame)
+        
+        # Initialize empty list for landmarks
+        landmarks = []
+        face_detected = False
+        
+        # Extract landmarks if a face is detected
+        if results.multi_face_landmarks:
+            face_detected = True
+            face_landmarks = results.multi_face_landmarks[0]
+            
+            # Convert normalized coordinates to pixel coordinates
+            for landmark in face_landmarks.landmark:
+                x, y, z = landmark.x * w, landmark.y * h, landmark.z
+                landmarks.append([x, y, z])
+        
+        return landmarks, face_detected
+    
+    def get_face_rect(self, landmarks: List[List[float]], padding: float = 0.1) -> Tuple[int, int, int, int]:
+        """
+        Get the face bounding rectangle from landmarks.
+        
+        Args:
+            landmarks: List of facial landmarks
+            padding: Padding factor to add around the face
+            
+        Returns:
+            Tuple containing (x, y, width, height) of the face bounding rectangle
+        """
+        if not landmarks:
+            return (0, 0, 0, 0)
+        
+        # Extract x, y coordinates
+        x_coords = [landmark[0] for landmark in landmarks]
+        y_coords = [landmark[1] for landmark in landmarks]
+        
+        # Find bounding box
+        left = int(min(x_coords))
+        top = int(min(y_coords))
+        right = int(max(x_coords))
+        bottom = int(max(y_coords))
+        
+        # Add padding
+        width = right - left
+        height = bottom - top
+        padding_x = int(width * padding)
+        padding_y = int(height * padding)
+        
+        left = max(0, left - padding_x)
+        top = max(0, top - padding_y)
+        right = right + padding_x
+        bottom = bottom + padding_y
+        
+        return (left, top, right - left, bottom - top)
+    
+    def get_specific_landmarks(self, landmarks: List[List[float]], indices: List[int]) -> List[List[float]]:
+        """
+        Extract specific landmarks by their indices.
+        
+        Args:
+            landmarks: List of all facial landmarks
+            indices: List of landmark indices to extract
+            
+        Returns:
+            List of selected landmarks
+        """
+        if not landmarks:
+            return []
+        
+        # Extract requested landmarks if available
+        selected_landmarks = []
+        for idx in indices:
+            if idx < len(landmarks):
+                selected_landmarks.append(landmarks[idx])
+        
+        return selected_landmarks
+    
+    def get_eye_landmarks(self, landmarks: List[List[float]], left_eye: bool = True) -> List[List[float]]:
+        """
+        Get landmarks for a specific eye.
+        
+        Args:
+            landmarks: List of all facial landmarks
+            left_eye: Whether to get left eye (True) or right eye (False) landmarks
+            
+        Returns:
+            List of eye landmarks
+        """
+        indices = self.LEFT_EYE_INDICES if left_eye else self.RIGHT_EYE_INDICES
+        return self.get_specific_landmarks(landmarks, indices)
+    
+    def get_mouth_landmarks(self, landmarks: List[List[float]]) -> List[List[float]]:
+        """
+        Get landmarks for the mouth.
+        
+        Args:
+            landmarks: List of all facial landmarks
+            
+        Returns:
+            List of mouth landmarks
+        """
+        return self.get_specific_landmarks(landmarks, self.MOUTH_INDICES)
+    
+    def get_outer_lip_landmarks(self, landmarks: List[List[float]]) -> List[List[float]]:
+        """
+        Get landmarks for the outer lip contour.
+        
+        Args:
+            landmarks: List of all facial landmarks
+            
+        Returns:
+            List of outer lip landmarks
+        """
+        return self.get_specific_landmarks(landmarks, self.OUTER_LIP_INDICES)
+    
+    def get_inner_lip_landmarks(self, landmarks: List[List[float]]) -> List[List[float]]:
+        """
+        Get landmarks for the inner lip contour.
+        
+        Args:
+            landmarks: List of all facial landmarks
+            
+        Returns:
+            List of inner lip landmarks
+        """
+        return self.get_specific_landmarks(landmarks, self.INNER_LIP_INDICES)
+    
+    def draw_facial_landmarks(self, frame: np.ndarray, landmarks: List[List[float]], 
+                           connections: Optional[List[Tuple[int, int]]] = None,
+                           landmark_color: Tuple[int, int, int] = (0, 255, 0),
+                           connection_color: Tuple[int, int, int] = (255, 0, 0),
+                           landmark_radius: int = 1,
+                           connection_thickness: int = 1) -> np.ndarray:
+        """
+        Draw facial landmarks and connections on the frame.
+        
+        Args:
+            frame: Input frame
+            landmarks: List of facial landmarks
+            connections: Optional list of tuples defining connections between landmarks
+            landmark_color: Color for landmarks (BGR)
+            connection_color: Color for connections (BGR)
+            landmark_radius: Radius of landmark points
+            connection_thickness: Thickness of connection lines
+            
+        Returns:
+            np.ndarray: Frame with visualized landmarks
+        """
+        vis_frame = frame.copy()
+        
+        # Draw landmarks
+        for landmark in landmarks:
+            x, y = int(landmark[0]), int(landmark[1])
+            cv2.circle(vis_frame, (x, y), landmark_radius, landmark_color, -1)
+        
+        # Draw connections
+        if connections:
+            for start_idx, end_idx in connections:
+                if start_idx < len(landmarks) and end_idx < len(landmarks):
+                    start_point = (int(landmarks[start_idx][0]), int(landmarks[start_idx][1]))
+                    end_point = (int(landmarks[end_idx][0]), int(landmarks[end_idx][1]))
+                    cv2.line(vis_frame, start_point, end_point, connection_color, connection_thickness)
+        
+        return vis_frame
+    
+    def get_eye_aspect_ratio(self, eye_landmarks: List[List[float]]) -> float:
+        """
+        Calculate the Eye Aspect Ratio (EAR) for eye landmarks.
+        
+        The EAR is calculated using 6 landmarks that outline the eye.
+        
+        Args:
+            eye_landmarks: List of eye landmarks
+            
+        Returns:
+            float: EAR value
+        """
+        # MediaPipe face mesh gives 16 landmarks per eye
+        # But we need specific points for EAR calculation
+        if len(eye_landmarks) < 16:
+            return 0.0
+        
+        # For the left eye:
+        # Vertical landmarks: (top to bottom pairs)
+        # 386 & 374 (upper and lower eyelid)
+        # 385 & 380 (upper and lower eyelid)
+        # 387 & 373 (upper and lower eyelid)
+        # Horizontal landmarks: 263 & 362 (eye corners)
+        
+        # For the right eye:
+        # Vertical landmarks: (top to bottom pairs)
+        # 159 & 145 (upper and lower eyelid)
+        # 158 & 153 (upper and lower eyelid)
+        # 160 & 144 (upper and lower eyelid)
+        # Horizontal landmarks: 33 & 133 (eye corners)
+        
+        # Check if this is left or right eye based on landmark coordinates
+        is_left_eye = eye_landmarks[0][0] > 300  # A rough check if x > 300 pixels
+        
+        if is_left_eye:
+            # Extract main landmarks for left eye EAR calculation
+            # Using indices in LEFT_EYE_INDICES
+            # 362=0, 385=13, 386=12, 387=11, 373=5, 374=4, 380=3, 263=8
+            corner1 = eye_landmarks[0]  # 362 (outer corner)
+            corner2 = eye_landmarks[8]  # 263 (inner corner)
+            upper1 = eye_landmarks[12]  # 386 (upper eyelid)
+            lower1 = eye_landmarks[4]   # 374 (lower eyelid)
+            upper2 = eye_landmarks[13]  # 385 (upper eyelid)
+            lower2 = eye_landmarks[3]   # 380 (lower eyelid)
+            upper3 = eye_landmarks[11]  # 387 (upper eyelid)
+            lower3 = eye_landmarks[5]   # 373 (lower eyelid)
+        else:
+            # Extract main landmarks for right eye EAR calculation
+            # Using indices in RIGHT_EYE_INDICES
+            # 33=0, 158=11, 159=10, 160=12, 144=3, 145=4, 153=6, 133=8
+            corner1 = eye_landmarks[0]  # 33 (outer corner)
+            corner2 = eye_landmarks[8]  # 133 (inner corner)
+            upper1 = eye_landmarks[10]  # 159 (upper eyelid)
+            lower1 = eye_landmarks[4]   # 145 (lower eyelid)
+            upper2 = eye_landmarks[11]  # 158 (upper eyelid)
+            lower2 = eye_landmarks[6]   # 153 (lower eyelid)
+            upper3 = eye_landmarks[12]  # 160 (upper eyelid)
+            lower3 = eye_landmarks[3]   # 144 (lower eyelid)
+            
+        # Calculate horizontal distance (eye width)
+        horizontal_dist = np.linalg.norm(np.array([corner1[0], corner1[1]]) - np.array([corner2[0], corner2[1]]))
+        
+        # Calculate vertical distances (3 points along the eye)
+        vertical_dist1 = np.linalg.norm(np.array([upper1[0], upper1[1]]) - np.array([lower1[0], lower1[1]]))
+        vertical_dist2 = np.linalg.norm(np.array([upper2[0], upper2[1]]) - np.array([lower2[0], lower2[1]]))
+        vertical_dist3 = np.linalg.norm(np.array([upper3[0], upper3[1]]) - np.array([lower3[0], lower3[1]]))
+        
+        # Calculate EAR using all three vertical measurements
+        if horizontal_dist == 0:
+            return 0.0
+        
+        ear = (vertical_dist1 + vertical_dist2 + vertical_dist3) / (3.0 * horizontal_dist)
+        return ear
+    
+    def _calculate_distance(self, point1, point2):
+        """Calculate Euclidean distance between two points.
+        
+        Args:
+            point1: (x, y) coordinates of first point
+            point2: (x, y) coordinates of second point
+            
+        Returns:
+            float: Euclidean distance between points
+        """
+        return np.sqrt((point1[0] - point2[0])**2 + (point1[1] - point2[1])**2)
+    
+    def get_mouth_aspect_ratio(self, landmarks: List[List[float]]) -> float:
+        """
+        Calculate the Mouth Aspect Ratio (MAR) using only inner lip landmarks.
+        
+        Formula:
+        MAR = (vertical distance between lips) / (horizontal distance between lips)
+        
+        Args:
+            landmarks: List of all facial landmarks
+            
+        Returns:
+            float: MAR value
+        """
+        if landmarks is None or not landmarks:
+            return 0.0
+            
+        # Get only inner lip landmarks
+        inner_lip = self.get_inner_lip_landmarks(landmarks)
+        
+        if not inner_lip or len(inner_lip) < 8:
+            return 0.0
+            
+        # Inner lip landmarks key points:
+        # Left corner: inner_lip[0] (corresponds to INNER_LIP_INDICES[0] = 78)
+        # Right corner: inner_lip[10] (corresponds to INNER_LIP_INDICES[10] = 308)
+        # Top middle: inner_lip[5] (corresponds to INNER_LIP_INDICES[5] = 13)
+        # Bottom middle: inner_lip[15] (corresponds to INNER_LIP_INDICES[15] = 14)
+        
+        # Find horizontal distance (width) between corners of the inner lips
+        horizontal_distance = self._calculate_distance(
+            inner_lip[0],  # left corner of inner lip
+            inner_lip[10]   # right corner of inner lip
+        )
+        
+        # Find vertical distance (height) between top and bottom of inner lips
+        vertical_distance = self._calculate_distance(
+            inner_lip[5],  # top middle of inner lip
+            inner_lip[15]   # bottom middle of inner lip
+        )
+        
+        # Calculate the average of multiple vertical distances for better accuracy
+        # These are different positions along the inner lip
+        vertical_distances = []
+        
+        # Add the middle vertical distance
+        vertical_distances.append(vertical_distance)
+        
+        # Add left-side vertical distance 
+        left_vertical = self._calculate_distance(
+            inner_lip[4],  # left-side of top inner lip
+            inner_lip[16]  # left-side of bottom inner lip
+        )
+        vertical_distances.append(left_vertical)
+        
+        # Add right-side vertical distance
+        right_vertical = self._calculate_distance(
+            inner_lip[6],  # right-side of top inner lip
+            inner_lip[14]  # right-side of bottom inner lip
+        )
+        vertical_distances.append(right_vertical)
+        
+        # Calculate average vertical distance
+        avg_vertical_distance = sum(vertical_distances) / len(vertical_distances)
+        
+        # Calculate MAR
+        if horizontal_distance == 0:  # Prevent division by zero
+            return 0.0
+            
+        mar = avg_vertical_distance / horizontal_distance
+        return mar
+    
+    def release(self):
+        """Release MediaPipe resources."""
+        self.face_mesh.close()
+
+# Convenience function to get a preconfigured MediaPipeUtils instance
+def get_mediapipe_face_mesh() -> MediaPipeUtils:
+    """
+    Factory function to create and return a MediaPipeUtils instance.
+    
+    Returns:
+        MediaPipeUtils: Initialized MediaPipeUtils instance
+    """
+    return MediaPipeUtils()
+
+def load_ui_config() -> Dict:
+    """
+    Load UI configuration parameters from the config file.
+    
+    This function reads the config.yaml file and extracts UI-related parameters
+    such as colors, widget sizes, progress bar thresholds, etc.
+    
+    Returns:
+        Dict: Dictionary containing UI configuration parameters
+    """
+    import yaml
+    import os
+    from pathlib import Path
+    
+    # Get the project root directory (assuming this file is in src/utils)
+    project_root = Path(__file__).parent.parent.parent
+    config_path = os.path.join(project_root, 'config', 'config.yaml')
+    
+    # Load the config file
+    with open(config_path, 'r') as config_file:
+        config = yaml.safe_load(config_file)
+    
+    # Create UI config dictionary with default values if not present in the config file
+    ui_config = {
+        # Main window parameters
+        'window': {
+            'title': config.get('ui', {}).get('window', {}).get('title', 'Sürücü Uykululuk Tespit Sistemi'),
+            'width': config.get('ui', {}).get('window', {}).get('width', 1280),
+            'height': config.get('ui', {}).get('window', {}).get('height', 800),
+            'min_width': config.get('ui', {}).get('window', {}).get('min_width', 800),
+            'min_height': config.get('ui', {}).get('window', {}).get('min_height', 600),
+        },
+        
+        # Video frame parameters
+        'video_frame': {
+            'width': config.get('ui', {}).get('video_frame', {}).get('width', 640),
+            'height': config.get('ui', {}).get('video_frame', {}).get('height', 480),
+        },
+        
+        # Indicator parameters
+        'indicators': {
+            'ear': {
+                'critical_threshold': config.get('detection', {}).get('ear_threshold', 0.21),
+                'warning_threshold': config.get('detection', {}).get('ear_threshold', 0.21) + 0.05,
+                'normal_color': config.get('ui', {}).get('indicators', {}).get('normal_color', '#00FF00'),
+                'warning_color': config.get('ui', {}).get('indicators', {}).get('warning_color', '#FFFF00'),
+                'critical_color': config.get('ui', {}).get('indicators', {}).get('critical_color', '#FF0000'),
+            },
+            'mar': {
+                'critical_threshold': config.get('detection', {}).get('mar_threshold', 0.65),
+                'warning_threshold': config.get('detection', {}).get('mar_threshold', 0.65) - 0.1,
+                'normal_color': config.get('ui', {}).get('indicators', {}).get('normal_color', '#00FF00'),
+                'warning_color': config.get('ui', {}).get('indicators', {}).get('warning_color', '#FFFF00'),
+                'critical_color': config.get('ui', {}).get('indicators', {}).get('critical_color', '#FF0000'),
+            },
+            'perclos': {
+                'critical_threshold': config.get('detection', {}).get('perclos', {}).get('threshold', 15.0),
+                'warning_threshold': config.get('detection', {}).get('perclos', {}).get('threshold', 15.0) - 5.0,
+                'normal_color': config.get('ui', {}).get('indicators', {}).get('normal_color', '#00FF00'),
+                'warning_color': config.get('ui', {}).get('indicators', {}).get('warning_color', '#FFFF00'),
+                'critical_color': config.get('ui', {}).get('indicators', {}).get('critical_color', '#FF0000'),
+            },
+            'progress_bar_height': config.get('ui', {}).get('indicators', {}).get('progress_bar_height', 20),
+            'label_width': config.get('ui', {}).get('indicators', {}).get('label_width', 80),
+        },
+        
+        # Chart parameters
+        'chart': {
+            'update_interval': config.get('ui', {}).get('chart', {}).get('update_interval', 100),  # ms
+            'history_duration': config.get('drowsiness', {}).get('history_duration', 5.0),  # seconds
+            'y_range_ear': config.get('ui', {}).get('chart', {}).get('y_range_ear', [0, 0.5]),
+            'y_range_mar': config.get('ui', {}).get('chart', {}).get('y_range_mar', [0, 1.0]),
+            'y_range_perclos': config.get('ui', {}).get('chart', {}).get('y_range_perclos', [0, 100]),
+            'line_width': config.get('ui', {}).get('chart', {}).get('line_width', 2),
+            'ear_color': config.get('ui', {}).get('chart', {}).get('ear_color', '#0000FF'),
+            'mar_color': config.get('ui', {}).get('chart', {}).get('mar_color', '#FF00FF'),
+            'perclos_color': config.get('ui', {}).get('chart', {}).get('perclos_color', '#FF5500'),
+        },
+        
+        # Control area parameters
+        'controls': {
+            'button_width': config.get('ui', {}).get('controls', {}).get('button_width', 120),
+            'button_height': config.get('ui', {}).get('controls', {}).get('button_height', 40),
+            'button_margin': config.get('ui', {}).get('controls', {}).get('button_margin', 10),
+            'font_size': config.get('ui', {}).get('controls', {}).get('font_size', 12),
+        },
+        
+        # Font parameters
+        'fonts': {
+            'family': config.get('ui', {}).get('fonts', {}).get('family', 'Arial'),
+            'title_size': config.get('ui', {}).get('fonts', {}).get('title_size', 16),
+            'label_size': config.get('ui', {}).get('fonts', {}).get('label_size', 12),
+            'status_size': config.get('ui', {}).get('fonts', {}).get('status_size', 10),
+        },
+        
+        # Margins and spacing
+        'layout': {
+            'margin': config.get('ui', {}).get('layout', {}).get('margin', 10),
+            'spacing': config.get('ui', {}).get('layout', {}).get('spacing', 5),
+            'padding': config.get('ui', {}).get('layout', {}).get('padding', 8),
+            'dock_width': config.get('ui', {}).get('layout', {}).get('dock_width', 200),
+        }
+    }
+    
+    return ui_config

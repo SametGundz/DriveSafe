@@ -1,0 +1,101 @@
+# Sürücü Uykululuk Tespiti Konfigürasyon Dosyası
+
+# Kamera parametreleri
+camera:
+  width: 640
+  height: 480
+  fps: 30
+  device: 0
+
+# Algılama parametreleri
+detection:
+  # EAR (Eye Aspect Ratio) parametreleri
+  ear_threshold: 0.21   # Gözlerin kapalı sayılması için EAR eşiği
+  
+  # MAR (Mouth Aspect Ratio) parametreleri
+  mar_threshold: 0.65   # Ağzın açık sayılması için MAR eşiği
+  
+  # Baş pozisyonu parametreleri
+  head_pose:
+    forward_pitch_threshold: 30.0  # İleri eğilme eşiği (derece)
+    side_yaw_threshold: 40.0       # Yana dönme eşiği (derece)
+    roll_threshold: 20.0           # Yalpalama eşiği (derece)
+  
+  # PERCLOS parametreleri
+  perclos:
+    window_size: 150               # PERCLOS hesaplaması için çerçeve sayısı (30 fps için 5 saniye)
+    threshold: 15.0                # Uykululuk uyarısı için PERCLOS yüzdesi eşiği
+  
+  # Bakış yönü parametreleri
+  gaze:
+    deviation_threshold: 20.0      # Bakış sapma eşiği (derece)
+
+# Uykululuk değerlendirme parametreleri
+drowsiness:
+  ear_closed_duration: 2.0         # Gözlerin kapalı kalma süresi eşiği (saniye)
+  mar_open_duration: 1.0           # Ağzın açık kalma süresi eşiği (saniye)
+  min_perclos_for_drowsy: 12.0     # Uykululuk için minimum PERCLOS değeri
+  history_duration: 5.0            # Geçmiş verileri saklama süresi (saniye)
+
+# Günlükleme parametreleri
+logging:
+  console_level: "info"            # Konsol günlük seviyesi (debug, info, warning, error)
+  file_level: "debug"              # Dosya günlük seviyesi
+  enable_console: true             # Konsol günlüklemesini etkinleştir
+  enable_file: true                # Dosya günlüklemesini etkinleştir
+
+# Görselleştirme parametreleri
+visualization:
+  show_fps: true                   # FPS göstergesini göster
+  show_metrics: true               # Ölçümleri göster
+  show_landmarks: false            # Yüz işaretlerini göster
+  show_head_pose: true             # Baş pozisyonunu göster
+  show_gaze: true                  # Bakış yönünü göster
+
+# Kullanıcı arayüzü (UI) parametreleri
+ui:
+  window:
+    title: "Sürücü Uykululuk Tespit Sistemi"
+    width: 1280
+    height: 800
+    min_width: 800
+    min_height: 600
+  
+  video_frame:
+    width: 640
+    height: 480
+  
+  indicators:
+    normal_color: "#00FF00"        # Normal durum rengi (yeşil)
+    warning_color: "#FFFF00"       # Uyarı durumu rengi (sarı)
+    critical_color: "#FF0000"      # Kritik durum rengi (kırmızı)
+    progress_bar_height: 20
+    label_width: 80
+  
+  chart:
+    update_interval: 100           # ms cinsinden grafik güncelleme aralığı
+    y_range_ear: [0, 0.5]          # EAR değerleri için Y ekseni aralığı
+    y_range_mar: [0, 1.0]          # MAR değerleri için Y ekseni aralığı
+    y_range_perclos: [0, 100]      # PERCLOS değerleri için Y ekseni aralığı
+    line_width: 2
+    ear_color: "#0000FF"           # EAR çizgi rengi (mavi)
+    mar_color: "#FF00FF"           # MAR çizgi rengi (mor)
+    perclos_color: "#FF5500"       # PERCLOS çizgi rengi (turuncu)
+  
+  controls:
+    button_width: 120
+    button_height: 40
+    button_margin: 10
+    font_size: 12
+  
+  fonts:
+    family: "Arial"
+    title_size: 16
+    label_size: 12
+    status_size: 10
+  
+  layout:
+    margin: 10
+    spacing: 5
+    padding: 8
+    dock_width: 200
