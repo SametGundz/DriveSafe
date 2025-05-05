@@ -1,234 +1,198 @@
-# Sürücü Uykululuk Tespit Sistemi (Driver Drowsiness Detection System)
+# Driver Drowsiness Detection (Sürücü Uykusu Tespiti)
 
-Bu proje, sürücü uykululuğunu gerçek zamanlı olarak tespit eden bir sistem sunar. Kamera üzerinden alınan görüntülerde sürücünün yüz ve göz hareketlerini izleyerek uykululuk belirtilerini tespit eder ve uyarılar oluşturur.
+Bu proje, sürücülerin uykululuk durumunu gerçek zamanlı olarak tespit eden bir sistemdir. ETH-XGaze bakış tahmin modeli kullanılarak sürücünün göz hareketleri, baş pozisyonu ve bakış yönü analiz edilir.
 
 ## Özellikler
 
-- **Göz Kapalılık Oranı (EAR)**: Gözlerin kapalı olup olmadığını tespit eder
-- **Ağız Açıklık Oranı (MAR)**: Esneme tespiti için ağız açıklığını izler
-- **Baş Pozisyonu Tahmini**: Sürücünün baş pozisyonunu takip eder
-- **PERCLOS (Percentage of Eye Closure)**: Belirli bir zaman diliminde gözlerin kapalı olduğu süre yüzdesini hesaplar
-- **Bakış Yönü Tespiti**: Sürücünün nereye baktığını tespit eder
-- **Karar Mekanizması**: Tüm bu verileri birleştirerek uykululuk seviyesini belirler
-- **Görselleştirme**: Tespit sonuçlarını gerçek zamanlı olarak gösterir
-- **Video Kayıt**: İsteğe bağlı olarak video kaydı alabilir
-
-## Çalışma Prensibi
-
-### Yüz İşaretleri Tespiti
-Sistem, MediaPipe Face Mesh modeli kullanarak yüzdeki 468 adet işaret noktasını (landmarks) tespit eder. Bu işaret noktaları, göz, ağız, burun, yüz konturu gibi yüzün önemli bölgelerini temsil eder.
-
-### Göz Kapalılık Oranı (EAR - Eye Aspect Ratio)
-EAR, göz işaret noktaları kullanılarak hesaplanan bir orandır ve gözün açıklık derecesini ölçer:
-
-```
-EAR = (V1 + V2 + V3) / (3 * H)
-```
-
-Burada:
-- V1, V2, V3: Gözdeki üç farklı dikey mesafe (üst ve alt göz kapağı arasındaki mesafeler)
-- H: Göz köşeleri arasındaki yatay mesafe
-
-EAR değeri, göz açıkken daha yüksek, kapalıyken daha düşüktür. Belirli bir eşik değerinin altına düştüğünde (tipik olarak 0.21), gözün kapalı olduğu tespit edilir.
-
-### Ağız Açıklık Oranı (MAR - Mouth Aspect Ratio)
-MAR, ağız işaret noktaları kullanılarak hesaplanan bir orandır ve ağzın açıklık derecesini ölçer. İç dudak noktaları kullanılarak hesaplanır:
-
-```
-MAR = (V_ortalaması) / H
-```
-
-Burada:
-- V_ortalaması: Ağzın üst ve alt dudakları arasındaki dikey mesafelerin ortalaması
-- H: Ağzın köşeleri arasındaki yatay mesafe
-
-MAR değeri, ağız açıkken (esneme durumunda) yükselir. Belirli bir eşik değerinin üzerine çıktığında (tipik olarak 0.65), esneme tespit edilir.
-
-### PERCLOS (Percentage of Eye Closure)
-PERCLOS, belirli bir zaman diliminde (tipik olarak 1-3 dakika) gözlerin kapalı olduğu sürenin yüzdesidir:
-
-```
-PERCLOS = (Gözün kapalı olduğu kareler / Toplam kare sayısı) * 100
-```
-
-Yüksek PERCLOS değeri (tipik olarak %15'in üzeri), sürücü yorgunluğunun önemli bir göstergesidir.
+- Gerçek zamanlı yüz tespiti ve izleme
+- ETH-XGaze modelini kullanarak bakış yönü tahmini
+- Göz kapalılık durumu ve uykululuk tespiti
+- Web kamerası veya video dosyası girişi desteği
+- ONNX ve PyTorch model formatları desteği
 
 ## Kurulum
 
-1. Gerekli bağımlılıkları yükleyin:
+### ETH-XGaze Modelini İndirme ve Kurulum
+
+ETH-XGaze modeli, bu projenin çalışması için gerekli olan temel bir bileşendir. Model dosyaları büyük boyutta olduğu için genellikle Git repositorylerine dahil edilmez ve .gitignore'a eklenir. Aşağıdaki adımları izleyerek ETH-XGaze modelini projenize ekleyebilirsiniz:
+
+#### 1. ETH-XGaze Modelini İndirme
+
+ETH-XGaze modelini şu kaynaklardan edinebilirsiniz:
+
+##### A. Resmi ETH-XGaze Deposundan İndirme:
+
+1. [ETH-XGaze resmi GitHub deposunu](https://github.com/xucong-zhang/ETH-XGaze) klonlayın:
    ```bash
-   pip install opencv-python numpy mediapipe pyyaml
+   git clone https://github.com/xucong-zhang/ETH-XGaze.git
    ```
 
-2. Projeyi klonlayın veya indirin:
+2. Eğitilmiş modeli [ETH-XGaze proje sayfasından](https://ait.ethz.ch/projects/2020/ETH-XGaze/) indirin. Modele erişmek için bir form doldurmanız gerekebilir.
+
+3. İndirilen model dosyasını (`epoch_24_ckpt.pth.tar` veya benzer isimde bir dosya) `ETH-XGaze/ckpt/` klasörüne yerleştirin.
+
+##### B. Önceden Dönüştürülmüş Modeli İndirme (Alternatif):
+
+Eğer dönüştürülmüş bir model dosyası kullanmak isterseniz, şu kaynaklardan edinebilirsiniz:
+- [Google Drive](https://drive.google.com/drive/folders/MODEL_ID) veya benzer bir kaynaktan önişlenmiş ETH-XGaze modelini indirebilirsiniz.
+
+#### 2. Model Dosyasını Projeye Ekleme
+
+1. `models` klasörü oluşturun (zaten varsa bu adımı atlayın):
    ```bash
-   git clone https://github.com/kullaniciadi/driver-drowsiness.git
+   mkdir -p models
+   ```
+
+2. İndirdiğiniz model dosyasını `models` klasörüne kopyalayın veya taşıyın:
+
+   **A) Orijinal ETH-XGaze modeli için:**
+   ```bash
+   # Orijinal model dosyasını dönüştürüp models klasörüne kaydedin
+   python scripts/convert_ethxgaze_model.py ETH-XGaze/ckpt/epoch_24_ckpt.pth.tar models/eth_xgaze_model.pth
+   # ONNX formatında da dönüştürebilirsiniz (opsiyonel)
+   python scripts/convert_ethxgaze_model.py ETH-XGaze/ckpt/epoch_24_ckpt.pth.tar models/eth_xgaze_model.onnx --export_onnx
+   ```
+
+   **B) Önceden dönüştürülmüş model için:**
+   ```bash
+   # İndirdiğiniz dosyayı models klasörüne kopyalayın
+   cp /indirme/konumu/eth_xgaze_model.pth models/
+   # veya
+   cp /indirme/konumu/eth_xgaze_model.onnx models/
+   ```
+
+#### 4. Model Varlığını Doğrulama
+
+Model dosyasının düzgün bir şekilde yerleştirildiğini doğrulamak için aşağıdaki komutu çalıştırabilirsiniz:
+
+```bash
+ls -la models/
+```
+
+Dosya listesinde `eth_xgaze_model.pth` veya `eth_xgaze_model.onnx` dosyasını görmelisiniz.
+
+#### 5. Test Etme
+
+Modelin düzgün çalıştığını test etmek için, örnek uygulamayı çalıştırın:
+
+```bash
+python examples/gaze_estimation_demo.py --device cpu --input webcam
+```
+
+Eğer model doğru yüklendiyse, uygulama sorunsuz çalışacaktır.
+
+### Gereksinimler
+
+- Python 3.8+
+- PyTorch 1.10+
+- OpenCV 4.5+
+- Numpy
+- ONNX (opsiyonel, ONNX model kullanımı için)
+- ONNXRuntime (opsiyonel, ONNX model kullanımı için)
+- MediaPipe (yüz tespiti ve landmark tespiti için)
+
+### Kurulum Adımları
+
+1. Repoyu klonlayın:
+   ```bash
+   git clone https://github.com/yourusername/driver-drowsiness.git
    cd driver-drowsiness
    ```
 
-3. 3D yüz modelini oluşturun:
+2. Gerekli paketleri yükleyin:
    ```bash
-   python create_3d_model.py
+   pip install -r requirements.txt
+   ```
+
+3. ETH-XGaze modellerini indirin veya dönüştürün:
+   ```bash
+   # Eğer orijinal ETH-XGaze reposu varsa:
+   python scripts/convert_ethxgaze_model.py ../ETH-XGaze/ckpt/epoch_24_ckpt.pth.tar models/eth_xgaze_model.pth
+   # Ayrıca ONNX modeli oluşturmak için:
+   python scripts/convert_ethxgaze_model.py ../ETH-XGaze/ckpt/epoch_24_ckpt.pth.tar models/eth_xgaze_model.onnx --export_onnx
    ```
 
 ## Kullanım
 
-Sistemi başlatmak için aşağıdaki seçeneklerden birini kullanabilirsiniz:
+### Bakış Tahmini Demo
 
-### 1. GUI ile Kullanım
-
-Grafiksel arayüz ile sistemi başlatmak için:
+Bu uygulama, web kamerası veya video dosyasından gerçek zamanlı bakış tahmini yapar:
 
 ```bash
-# Ana dizinden:
-./run_gui.py
-
-# Veya Python ile:
-python run_gui.py
-
-# Alternatif olarak:
-python src/main.py
+python examples/gaze_estimation_demo.py --device cpu --input webcam
+# veya bir video dosyası için:
+python examples/gaze_estimation_demo.py --device cpu --input path/to/video.mp4
+# veya normalize edilmiş yüz görüntüsünü göstermek için:
+python examples/gaze_estimation_demo.py --device cpu --input webcam --show_normalized
 ```
 
-GUI arayüzü şu özelliklere sahiptir:
-- Kamera görüntüsünün canlı görüntülenmesi
-- EAR, MAR ve PERCLOS değerlerinin gerçek zamanlı göstergeleri
-- Baş pozisyonu ve bakış yönü bilgileri
-- Gerçek zamanlı veri grafiği
-- Ayarlar menüsü ile parametrelerin düzenlenmesi
-- Menü ve araç çubuğu üzerinden tüm işlevlere erişim
+### Uykululuk Tespiti Demo
 
-### 2. Komut Satırı ile Kullanım
-
-Komut satırı arayüzü ile sistemi başlatmak için:
+Bu uygulama, sürücünün uykululuk durumunu tespit eder:
 
 ```bash
-python run.py [SEÇENEKLER]
+python examples/drowsiness_detection.py --device cpu --input webcam
+# veya bir video dosyası için:
+python examples/drowsiness_detection.py --device cpu --input path/to/video.mp4
 ```
 
-### Komut Satırı Seçenekleri
+### Model Dönüştürücü
 
-- `--camera KAMERA_INDEKSI`: Kullanılacak kamera indeksi (varsayılan: 0)
-- `--width GENİŞLİK`: Kamera çerçeve genişliği (varsayılan: 640)
-- `--height YÜKSEKLİK`: Kamera çerçeve yüksekliği (varsayılan: 480)
-- `--fps FPS`: Kamera kare hızı (varsayılan: 30)
-- `--show-fps`: Ekranda FPS göstergesini görüntüler
-- `--record`: Video kaydını etkinleştirir
-- `--log-level LEVEL`: Günlük seviyesi (debug, info, warning, error) (varsayılan: info)
-- `--config DOSYA_YOLU`: Konfigürasyon dosyası yolu (varsayılan: config/config.yaml)
-
-### Örnek Kullanım
+ETH-XGaze model formatlarını dönüştürmek için:
 
 ```bash
-python run.py --camera 0 --width 800 --height 600 --show-fps --record
+python scripts/convert_ethxgaze_model.py <kaynak_model> <hedef_model> [--export_onnx] [--device cpu|cuda]
 ```
 
-### Klavye Kısayolları
+### MediaPipe Landmark İndeksleri
 
-Uygulama çalışırken aşağıdaki klavye kısayollarını kullanabilirsiniz:
+Gaze tahmini için kullanılan özel landmark indeksleri şunlardır:
 
-- `q`: Uygulamadan çıkış
-- `r`: Video kaydını başlat/durdur
-- `d`: Algılamayı etkinleştir/devre dışı bırak
-- `h`: Yardım menüsünü göster/gizle
-- `s`: Ekran görüntüsü al
+- **Sol göz köşeleri**: 33, 133
+- **Sağ göz köşeleri**: 362, 263
+- **Burun**: 4, 5
 
-## Teknik Detaylar
+Bu landmark'lar, MediaPipe Face Mesh tarafından sağlanan 468 noktanın özel bir alt kümesidir. Doğru gaze tahmini için bu indekslerin doğru şekilde çıkarılması gerekmektedir.
 
-### Yüz ve Göz Tespiti
-MediaPipe Face Mesh modeli, toplamda 468 yüz işaret noktası (landmarks) kullanır. Bu sistemde:
+MediaPipe Face Mesh landmark indeksleriyle ilgili tam belgelendirme için [Google MediaPipe Face Mesh sayfasına](https://developers.google.com/mediapipe/solutions/vision/face_landmarker) bakabilirsiniz.
 
-- **Göz İşaret Noktaları**:
-  - Sol göz: [362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387, 386, 385, 384, 398]
-  - Sağ göz: [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246]
+## ETH-XGaze Entegrasyonu
 
-- **Ağız İşaret Noktaları**:
-  - Dış dudak: [61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291, 375, 321, 405, 314, 17, 84, 181, 91, 146]
-  - İç dudak: [78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308, 324, 318, 402, 317, 14, 87, 178, 88, 95]
+Bu proje, ETH-XGaze bakış tahmini modelini kullanmaktadır. ETH-XGaze'in orijinal çalışmasıyla uyumlu olması için aşağıdaki bileşenler uyarlanmıştır:
 
-### EAR Hesaplama Algoritması
-Göz Açıklık Oranı (EAR), gözdeki özel nokta çiftleri kullanılarak hesaplanır. Bu hesaplamada:
+1. **Yüz Normalizasyonu**: Yüz görselleri, ETH-XGaze projesindeki `normalizeData_face` fonksiyonu baz alınarak normalize edilir.
+2. **Model Yapısı**: GazeResNet, ETH-XGaze projesindeki ResNet50 mimarisi temel alınarak oluşturulmuştur.
+3. **Model Yükleme**: ModelLoader, ETH-XGaze modelleriyle uyumlu çalışacak şekilde tasarlanmıştır.
 
-1. Her bir göz için üç farklı dikey mesafe ölçülür:
-   - Göz üst kenarı ve alt kenarı arasındaki dikey mesafeler
-2. Göz köşeleri arasındaki yatay mesafe ölçülür
-3. EAR = Dikey mesafelerin ortalaması / Yatay mesafe
+## Test
 
-### MAR Hesaplama Algoritması
-Ağız Açıklık Oranı (MAR), iç dudak işaret noktaları kullanılarak hesaplanır. Bu hesaplamada:
+Ünite testlerini çalıştırmak için:
 
-1. İç dudak köşeleri arasındaki yatay mesafe ölçülür (H)
-2. İç dudağın üst ve alt noktaları arasında çeşitli dikey mesafeler ölçülür:
-   - Orta dikey mesafe (dudak ortasında)
-   - Sol taraf dikey mesafe
-   - Sağ taraf dikey mesafe
-3. Dikey mesafelerin ortalaması hesaplanır (V_ort)
-4. MAR = V_ort / H
-
-Bu yaklaşım, ağzın farklı bölgelerindeki açıklıkları dikkate alarak daha doğru bir MAR değeri elde etmeyi sağlar.
-
-### Karar Verme Mekanizması
-Uykululuk tespiti, aşağıdaki parametrelerin kombinasyonu kullanılarak yapılır:
-
-1. **EAR Eşik Değeri**: Tipik olarak 0.21-0.25 arası, bu değerin altında gözler kapalı kabul edilir
-2. **MAR Eşik Değeri**: Tipik olarak 0.6-0.7 arası, bu değerin üstünde esneme tespit edilir
-3. **PERCLOS Eşik Değeri**: Tipik olarak %15, bu değerin üstünde sürücü yorgun kabul edilir
-4. **Göz Kapanma Süresi**: Gözlerin kapalı kaldığı süre, mikro uyku tespiti için kullanılır
-
-## Proje Yapısı
-
-```
-driver-drowsiness/
-├── config/
-│   └── config.yaml             # Konfigürasyon dosyası
-├── models/
-│   └── headpose_3d_model.npy   # 3D yüz modeli
-├── recordings/                 # Kaydedilen videolar
-├── screenshots/                # Ekran görüntüleri
-├── logs/                       # Log dosyaları
-├── src/
-│   ├── detection/              # Algılama modülleri
-│   ├── decision/               # Karar modülleri
-│   ├── ui/                     # Grafiksel arayüz modülleri
-│   │   ├── widgets.py          # Özel arayüz bileşenleri
-│   │   └── main_window.py      # Ana pencere uygulaması
-│   ├── utils/                  # Yardımcı modüller
-│   └── main.py                 # GUI ana giriş noktası
-├── create_3d_model.py          # 3D model oluşturucu
-├── run.py                      # Komut satırı başlatıcı betik
-└── README.md                   # Bu dosya
+```bash
+python -m unittest discover tests
+# veya belirli bir test dosyası için:
+python -m unittest tests.test_gaze_estimator
 ```
 
-## Konfigürasyon
+## Sorun Giderme
 
-Sistem davranışını özelleştirmek için `config/config.yaml` dosyasını düzenleyebilirsiniz. Bu dosyada şunları ayarlayabilirsiniz:
+### Gaze Tahmini Çalışmıyor
 
-- Kamera parametreleri
-- Algılama eşikleri
-- Uykululuk değerlendirme parametreleri
-- Görselleştirme seçenekleri
-- Günlükleme ayarları
+Eğer "cannot reshape array of size X into shape (6,1,2)" benzeri bir hata alıyorsanız, MediaPipe'dan gelen landmark'ların doğru şekilde işlenmediği anlamına gelir. process_landmarks fonksiyonunun düzgün çalıştığından ve doğru indekslerin kullanıldığından emin olun.
+
+### Model Dosyası Bulunamadı
+
+Eğer "ETH-XGaze model dosyası bulunamadı" hatası alıyorsanız, şu konumlardan birinde model dosyasının bulunduğundan emin olun:
+- models/eth_xgaze_model.pth
+- models/eth_xgaze_model.pth.tar
+- models/pretrained/eth_xgaze.pth
+- models/pretrained/eth_xgaze.pth.tar
 
 ## Lisans
 
-Bu proje [MIT lisansı](LICENSE) altında lisanslanmıştır.
+Bu proje, açık kaynak [MIT Lisansı](LICENSE) altında lisanslanmıştır.
 
-## İletişim
+## Referanslar
 
-Sorularınız veya geri bildirimleriniz için iletişime geçin: email@example.com
-
-## Gereksinimler
-
-- Python 3.8 veya üzeri
-- Bağımlılıklar:
-  ```bash
-  pip install -r requirements.txt
-  ```
-
-Temel kütüphaneler:
-- OpenCV
-- NumPy
-- MediaPipe
-- PyYAML
-- PyQt6
-- PyQtChart
+- [ETH-XGaze: A Large Scale Dataset for Gaze Estimation under Extreme Head Pose and Gaze Variation](https://ait.ethz.ch/projects/2020/ETH-XGaze/)
+- [MediaPipe Face Mesh](https://google.github.io/mediapipe/solutions/face_mesh.html)

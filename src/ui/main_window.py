@@ -68,7 +68,6 @@ class DriverDrowsinessMainWindow(QMainWindow):
             'ear': 0.25,
             'mar': 0.5,
             'perclos': 5.0,
-            'head_pose': (10.0, 5.0, 2.0),
             'gaze_dir': (0.1, 0.2, 0.8)
         }
         
@@ -310,33 +309,6 @@ class DriverDrowsinessMainWindow(QMainWindow):
         self.perclos_indicator = IndicatorWidget("PERCLOS", self.config)
         stats_layout.addWidget(self.perclos_indicator, 2, 0)
         
-        # Head pose indicator
-        head_pose_widget = QWidget()
-        head_pose_layout = QVBoxLayout(head_pose_widget)
-        head_pose_layout.setContentsMargins(
-            self.config['layout']['padding'],
-            self.config['layout']['padding'],
-            self.config['layout']['padding'],
-            self.config['layout']['padding']
-        )
-        
-        head_pose_title = QLabel("Head Pose")
-        head_pose_title.setFont(QFont(
-            self.config['fonts']['family'],
-            self.config['fonts']['label_size'],
-            QFont.Weight.Medium
-        ))
-        head_pose_layout.addWidget(head_pose_title)
-        
-        self.head_pose_label = QLabel("Pitch: 0.0°, Yaw: 0.0°, Roll: 0.0°")
-        self.head_pose_label.setFont(QFont(
-            self.config['fonts']['family'],
-            self.config['fonts']['label_size']
-        ))
-        head_pose_layout.addWidget(self.head_pose_label)
-        
-        stats_layout.addWidget(head_pose_widget, 3, 0)
-        
         # Gaze direction indicator
         gaze_widget = QWidget()
         gaze_layout = QVBoxLayout(gaze_widget)
@@ -346,6 +318,7 @@ class DriverDrowsinessMainWindow(QMainWindow):
             self.config['layout']['padding'],
             self.config['layout']['padding']
         )
+        gaze_layout.setSpacing(5)  # Azaltılmış boşluk
         
         gaze_title = QLabel("Gaze Direction")
         gaze_title.setFont(QFont(
@@ -355,14 +328,32 @@ class DriverDrowsinessMainWindow(QMainWindow):
         ))
         gaze_layout.addWidget(gaze_title)
         
-        self.gaze_label = QLabel("Vector: [0.0, 0.0, 0.0]")
-        self.gaze_label.setFont(QFont(
-            self.config['fonts']['family'],
-            self.config['fonts']['label_size']
-        ))
-        gaze_layout.addWidget(self.gaze_label)
+        # Her bir koordinat için ayrı label
+        self.gaze_x_label = QLabel("X: 0.00")
+        self.gaze_y_label = QLabel("Y: 0.00")
+        self.gaze_z_label = QLabel("Z: 0.00")
         
-        stats_layout.addWidget(gaze_widget, 4, 0)
+        # Daha küçük font
+        smaller_font = QFont(
+            self.config['fonts']['family'],
+            self.config['fonts']['label_size'] - 1
+        )
+        self.gaze_x_label.setFont(smaller_font)
+        self.gaze_y_label.setFont(smaller_font)
+        self.gaze_z_label.setFont(smaller_font)
+        
+        # Stil ayarları
+        self.gaze_x_label.setStyleSheet("color: #ff3b30;")  # Kırmızı
+        self.gaze_y_label.setStyleSheet("color: #34c759;")  # Yeşil
+        self.gaze_z_label.setStyleSheet("color: #5856d6;")  # Mor
+        
+        # Etiketleri düzene ekle
+        gaze_layout.addWidget(self.gaze_x_label)
+        gaze_layout.addWidget(self.gaze_y_label)
+        gaze_layout.addWidget(self.gaze_z_label)
+        
+        # Widget'ı stats_layout'a ekle
+        stats_layout.addWidget(gaze_widget, 3, 0)
         
         self.stats_widget = stats_widget
         top_layout.addWidget(stats_widget)
@@ -589,7 +580,7 @@ class DriverDrowsinessMainWindow(QMainWindow):
         pixmap = QPixmap.fromImage(q_img)
         self.video_frame.setPixmap(pixmap)
     
-    def update_metrics(self, ear, mar, perclos, head_pose, gaze_dir):
+    def update_metrics(self, ear, mar, perclos, gaze_dir):
         """
         Update all metrics displayed in the UI.
         
@@ -597,7 +588,6 @@ class DriverDrowsinessMainWindow(QMainWindow):
             ear: Eye Aspect Ratio value
             mar: Mouth Aspect Ratio value
             perclos: PERCLOS value
-            head_pose: Tuple of (pitch, yaw, roll) angles in degrees
             gaze_dir: List or tuple of [x, y, z] gaze direction vector
         """
         # Update indicator widgets
@@ -619,21 +609,11 @@ class DriverDrowsinessMainWindow(QMainWindow):
             max_val=self.config['chart']['y_range_perclos'][1]
         )
         
-        # Update head pose
-        pitch, yaw, roll = head_pose
-        self.head_pose_label.setText(f"Pitch: {pitch:.1f}°, Yaw: {yaw:.1f}°, Roll: {roll:.1f}°")
-        
         # Update gaze direction
         x, y, z = gaze_dir
-        self.gaze_label.setText(f"Vector: [{x:.2f}, {y:.2f}, {z:.2f}]")
-        
-        # Add current time point to chart series
-        # In a real implementation, you would have a timer that adds points at regular intervals
-        # Here we just demonstrate how to add a point
-        # current_time = ... # Current time in seconds
-        # self.ear_series.append(current_time, ear)
-        # self.mar_series.append(current_time, mar)
-        # self.perclos_series.append(current_time, perclos)
+        self.gaze_x_label.setText(f"X: {x:.2f}")
+        self.gaze_y_label.setText(f"Y: {y:.2f}")
+        self.gaze_z_label.setText(f"Z: {z:.2f}")
     
     def _toggle_stats_panel(self, checked):
         """Toggle the visibility of the stats panel."""
@@ -785,8 +765,7 @@ class DriverDrowsinessMainWindow(QMainWindow):
         ear = 0.0
         mar = 0.0
         perclos = 0.0
-        head_pose = (0.0, 0.0, 0.0)  # pitch, yaw, roll
-        gaze_dir = (0.0, 0.0, 0.0)  # x, y, z
+        gaze_dir = (0.0, 0.0, 0.0)
         
         if face_detected:
             # Get eye landmarks
@@ -898,7 +877,7 @@ class DriverDrowsinessMainWindow(QMainWindow):
         self.update_video_frame(frame)
         
         # Update metrics UI
-        self.update_metrics(ear, mar, perclos, head_pose, gaze_dir)
+        self.update_metrics(ear, mar, perclos, gaze_dir)
     
     def _update_chart_data(self):
         """Update the chart with new data points."""

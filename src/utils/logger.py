@@ -137,7 +137,6 @@ class DrowsinessLogger:
     def log_drowsiness_data(self, 
                            ear: Optional[float], 
                            mar: Optional[float], 
-                           head_pose: Optional[tuple],
                            perclos: Optional[float], 
                            kss_score: Optional[int],
                            alert_status: bool):
@@ -147,7 +146,6 @@ class DrowsinessLogger:
         Args:
             ear: Eye Aspect Ratio value
             mar: Mouth Aspect Ratio value
-            head_pose: Tuple of (pitch, yaw, roll) angles
             perclos: PERCLOS value
             kss_score: Karolinska Sleepiness Scale score
             alert_status: Whether drowsiness alert is active
@@ -157,7 +155,6 @@ class DrowsinessLogger:
             'time': time.time(),
             'ear': ear,
             'mar': mar,
-            'head_pose': head_pose,
             'perclos': perclos,
             'kss_score': kss_score,
             'alert': alert_status

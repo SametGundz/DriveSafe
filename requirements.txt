@@ -1,6 +1,5 @@
 # Temel Kütüphaneler
 numpy>=1.20.0
-opencv-python>=4.5.5.64
 PyYAML>=6.0
 matplotlib>=3.5.1
 
@@ -9,8 +8,7 @@ mediapipe>=0.8.9
 scipy>=1.7.3
 
 # Derin Öğrenme
-torch>=1.10.0
-torchvision>=0.11.1
+onnxruntime>=1.10.0  # ONNX model desteği için
 
 # Argüman İşleme ve Genel Yardımcı Araçlar
 tqdm>=4.62.3
@@ -23,3 +21,9 @@ seaborn>=0.11.2
 # GUI
 PyQt6>=6.4.0
 PyQt6-Charts>=6.4.0
+
+opencv-python
+dlib
+imutils
+torch
+torchvision
