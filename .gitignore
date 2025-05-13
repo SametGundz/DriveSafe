@@ -188,6 +188,10 @@ screenshots/*.png
 screenshots/*.jpg
 screenshots/*.jpeg
 
+# Docs - Dökümantasyon dosyaları
+docs/
+docs/**/*
+
 # ETH-XGaze model dosyaları ve ilgili kaynaklar
 models/*.pth
 models/*.pth.tar
