@@ -27,3 +27,5 @@ dlib
 imutils
 torch
 torchvision
+scikit-learn
+plotly  
