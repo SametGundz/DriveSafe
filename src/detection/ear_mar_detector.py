@@ -198,22 +198,6 @@ class EARMARDetector:
         Returns:
             np.ndarray: Frame with visualizations
         """
-        vis_frame = frame.copy()
-        
-        # Draw EAR and MAR values on the frame
-        eye_status = "CLOSED" if eyes_closed else "OPEN"
-        mouth_status = "OPEN" if mouth_open else "CLOSED"
-        
-        ear_text = f"EAR: {ear:.2f} (Eyes {eye_status})" if ear is not None else "EAR: No Face"
-        mar_text = f"MAR: {mar:.2f} (Mouth {mouth_status})" if mar is not None else "MAR: No Face"
-        
-        # Set color based on status
-        ear_color = (0, 0, 255) if eyes_closed else (0, 255, 0)  # Red if closed, green if open
-        mar_color = (0, 0, 255) if mouth_open else (0, 255, 0)  # Red if open, green if closed
-        
-        # Put text on frame
-        cv2.putText(vis_frame, ear_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, ear_color, 2)
-        cv2.putText(vis_frame, mar_text, (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, mar_color, 2)
-        
-        return vis_frame
+        # Just return a copy of the original frame without any text overlays
+        return frame.copy()
 

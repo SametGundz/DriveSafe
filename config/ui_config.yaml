@@ -1,0 +1,62 @@
+# UI Configuration for Driver Drowsiness Detection Application
+
+window:
+  title: 'Sürücü Uykululuk Tespiti'
+  width: 1200
+  height: 800
+  min_width: 800
+  min_height: 600
+
+video_frame:
+  width: 640
+  height: 480
+
+layout:
+  margin: 10
+  padding: 5
+  spacing: 10
+
+fonts:
+  family: 'Arial'
+  title_size: 14
+  label_size: 12
+  value_size: 16
+
+controls:
+  button_width: 120
+  button_height: 40
+
+indicators:
+  label_width: 80
+  progress_bar_height: 15
+  ear:
+    min: 0.0
+    max: 0.4
+    warning_threshold: 0.25
+    critical_threshold: 0.21
+    normal_color: "#34c759"  # Apple green
+  mar:
+    min: 0.0
+    max: 1.0
+    warning_threshold: 0.7
+    critical_threshold: 0.8
+    normal_color: "#34c759"  # Apple green
+  perclos:
+    min: 0.0
+    max: 100.0
+    warning_threshold: 15.0
+    critical_threshold: 20.0
+    normal_color: "#34c759"  # Apple green
+
+chart:
+  history_duration: 30
+  line_width: 2
+  y_range_ear: [0.0, 0.4]
+  y_range_mar: [0.0, 1.0]
+  y_range_perclos: [0.0, 100.0]
+
+camera:
+  device: 0
+  width: 640
+  height: 480
+  fps: 30 

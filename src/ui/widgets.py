@@ -79,7 +79,9 @@ class IndicatorWidget(QWidget):
             self.config['fonts']['label_size'],
             QFont.Weight.Medium
         ))
-        self.title_label.setMinimumWidth(self.config['indicators']['label_width'])
+        # Use .get() method with a default value of 80 if 'label_width' doesn't exist
+        label_width = self.config.get('indicators', {}).get('label_width', 80)
+        self.title_label.setMinimumWidth(label_width)
         header_layout.addWidget(self.title_label)
         
         # Value label (right-aligned)
@@ -95,13 +97,17 @@ class IndicatorWidget(QWidget):
         
         # Progress bar
         self.progress_bar = QProgressBar()
-        self.progress_bar.setFixedHeight(self.config['indicators']['progress_bar_height'])
+        # Use default value for progress_bar_height if it doesn't exist
+        progress_bar_height = self.config.get('indicators', {}).get('progress_bar_height', 15)
+        self.progress_bar.setFixedHeight(progress_bar_height)
         self.progress_bar.setMinimum(0)
         self.progress_bar.setMaximum(100)
         self.progress_bar.setValue(0)
         self.progress_bar.setTextVisible(False)
         
         # Apply stylesheet for a modern, minimalist progress bar
+        # Use default color if normal_color doesn't exist
+        normal_color = self.indicator_config.get('normal_color', "#34c759")  # Default to green
         self.progress_bar.setStyleSheet(
             f"""
             QProgressBar {{
@@ -112,7 +118,7 @@ class IndicatorWidget(QWidget):
                 margin-top: 4px;
             }}
             QProgressBar::chunk {{
-                background-color: {self.indicator_config['normal_color']};
+                background-color: {normal_color};
                 border-radius: 4px;
             }}
             """

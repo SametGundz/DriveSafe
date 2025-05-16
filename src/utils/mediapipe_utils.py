@@ -11,6 +11,7 @@ particularly for face mesh processing operations.
 import cv2
 import numpy as np
 import mediapipe as mp
+import math
 from typing import List, Tuple, Dict, Optional, Union
 
 class MediaPipeUtils:
@@ -41,6 +42,19 @@ class MediaPipeUtils:
     FACE_CONTOUR_INDICES = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152]
     # Nose landmarks
     NOSE_INDICES = [168, 6, 197, 195, 5, 4, 19, 94, 2]
+    
+    # Baş duruşu hesaplama için gerekli noktalar (estimator.py'den alındı)
+    HEAD_POSE_LANDMARKS = [1, 9, 57, 130, 287, 359]
+    
+    # 3D model noktaları (estimator.py'den alındı)
+    MODEL_POINTS = np.array([
+        [285, 528, 200],
+        [285, 371, 152],
+        [197, 574, 128],
+        [173, 425, 108],
+        [360, 574, 128],
+        [391, 425, 108]
+    ], dtype=np.float64)
     
     def __init__(self, 
                 static_image_mode: bool = False, 
@@ -722,6 +736,187 @@ class MediaPipeUtils:
         
         return vis_frame
     
+    def calculate_head_pose(self, landmarks: List[List[float]], frame: np.ndarray) -> Tuple[np.ndarray, Tuple[float, float, float]]:
+        """
+        Baş duruşunu hesapla (yaw, pitch, roll) - estimator.py yaklaşımıyla
+        
+        Args:
+            landmarks: MediaPipe yüz işaretleri
+            frame: Görüntü karesi
+            
+        Returns:
+            Tuple containing:
+            - Frame with head pose visualization
+            - Angles (pitch, yaw, roll) in degrees
+        """
+        if not landmarks:
+            return frame, (0, 0, 0)
+            
+        h, w, c = frame.shape
+        
+        # 2D landmark noktalarını al (estimator.py'den alınan indeksler)
+        face_coordination_in_image = []
+        for idx in self.HEAD_POSE_LANDMARKS:
+            if idx < len(landmarks):
+                x, y = int(landmarks[idx][0]), int(landmarks[idx][1])
+                face_coordination_in_image.append([x, y])
+                # Baş duruşu hesaplama için kullanılan noktaları vurgula
+                cv2.circle(frame, (x, y), 3, (0, 0, 255), -1)
+        
+        # Nokta sayısı yetersizse işleme devam etme
+        if len(face_coordination_in_image) != len(self.HEAD_POSE_LANDMARKS):
+            return frame, (0, 0, 0)
+            
+        face_coordination_in_image = np.array(face_coordination_in_image, dtype=np.float64)
+        
+        # Kamera matrisi güncelle
+        focal_length = 1 * w
+        cam_matrix = np.array([
+            [focal_length, 0, w / 2],
+            [0, focal_length, h / 2],
+            [0, 0, 1]
+        ], dtype=np.float64)
+        
+        # Distorsiyon katsayıları
+        dist_matrix = np.zeros((4, 1), dtype=np.float64)
+        
+        # SolvePnP ile rotasyon vektörünü ve translasyon vektörünü hesapla
+        success, rotation_vec, translation_vec = cv2.solvePnP(
+            self.MODEL_POINTS, face_coordination_in_image, cam_matrix, dist_matrix)
+        
+        if not success:
+            return frame, (0, 0, 0)
+        
+        # Rotasyon matrisini hesapla
+        rotation_matrix, _ = cv2.Rodrigues(rotation_vec)
+        
+        # Euler açılarını hesapla
+        angles = self.rotation_matrix_to_angles(rotation_matrix)
+        
+        return frame, angles
+    
+    def rotation_matrix_to_angles(self, rotation_matrix: np.ndarray) -> Tuple[float, float, float]:
+        """
+        Rotasyon matrisinden Euler açılarını hesapla (estimator.py'den alındı)
+        
+        Args:
+            rotation_matrix: Rotasyon matrisi
+            
+        Returns:
+            Tuple[float, float, float]: (pitch, yaw, roll) açıları (derece cinsinden)
+        """
+        x = math.atan2(rotation_matrix[2, 1], rotation_matrix[2, 2])
+        y = math.atan2(-rotation_matrix[2, 0], math.sqrt(rotation_matrix[0, 0] ** 2 +
+                                                        rotation_matrix[1, 0] ** 2))
+        z = math.atan2(rotation_matrix[1, 0], rotation_matrix[0, 0])
+        
+        # Derece cinsine çevir
+        return (x * 180.0 / math.pi, y * 180.0 / math.pi, z * 180.0 / math.pi)
+    
+    def draw_head_pose_axes(self, frame: np.ndarray, landmarks: List[List[float]], 
+                           length: int = 50) -> np.ndarray:
+        """
+        Baş duruşu eksenlerini çiz
+        
+        Args:
+            frame: Görüntü karesi
+            landmarks: Yüz işaretleri
+            length: Eksen uzunluğu
+            
+        Returns:
+            np.ndarray: Eksenler eklenmiş görüntü
+        """
+        if not landmarks:
+            return frame
+            
+        h, w, c = frame.shape
+        
+        # 2D landmark noktalarını al
+        face_coordination_in_image = []
+        for idx in self.HEAD_POSE_LANDMARKS:
+            if idx < len(landmarks):
+                x, y = int(landmarks[idx][0]), int(landmarks[idx][1])
+                face_coordination_in_image.append([x, y])
+        
+        # Nokta sayısı yetersizse işleme devam etme
+        if len(face_coordination_in_image) != len(self.HEAD_POSE_LANDMARKS):
+            return frame
+            
+        face_coordination_in_image = np.array(face_coordination_in_image, dtype=np.float64)
+        
+        # Kamera matrisi güncelle
+        focal_length = 1 * w
+        cam_matrix = np.array([
+            [focal_length, 0, w / 2],
+            [0, focal_length, h / 2],
+            [0, 0, 1]
+        ], dtype=np.float64)
+        
+        # Distorsiyon katsayıları
+        dist_matrix = np.zeros((4, 1), dtype=np.float64)
+        
+        # SolvePnP ile rotasyon vektörünü ve translasyon vektörünü hesapla
+        success, rotation_vec, translation_vec = cv2.solvePnP(
+            self.MODEL_POINTS, face_coordination_in_image, cam_matrix, dist_matrix)
+        
+        if not success:
+            return frame
+            
+        # Eksen noktalarını oluştur
+        axis_points = np.array([
+            [0, 0, 0],       # Orijin
+            [length, 0, 0],  # X ekseni
+            [0, length, 0],  # Y ekseni
+            [0, 0, length]   # Z ekseni
+        ], dtype=np.float32)
+        
+        # 3D noktaları 2D'ye projeksiyon yap
+        imgpts, jac = cv2.projectPoints(axis_points, rotation_vec, translation_vec, cam_matrix, dist_matrix)
+        imgpts = imgpts.astype(int)
+        
+        # Eksenleri çiz
+        origin = tuple(imgpts[0].ravel())
+        frame = cv2.line(frame, origin, tuple(imgpts[1].ravel()), (0, 0, 255), 3)  # X ekseni - Kırmızı
+        frame = cv2.line(frame, origin, tuple(imgpts[2].ravel()), (0, 255, 0), 3)  # Y ekseni - Yeşil
+        frame = cv2.line(frame, origin, tuple(imgpts[3].ravel()), (255, 0, 0), 3)  # Z ekseni - Mavi
+        
+        return frame
+    
+    def visualize_head_pose(self, frame: np.ndarray, landmarks: List[List[float]], 
+                           show_axes: bool = True, show_angles: bool = True) -> np.ndarray:
+        """
+        Baş duruşunu görselleştir
+        
+        Args:
+            frame: Görüntü karesi
+            landmarks: Yüz işaretleri
+            show_axes: Eksenleri göster
+            show_angles: Açıları göster
+            
+        Returns:
+            np.ndarray: Görselleştirilmiş görüntü
+        """
+        if not landmarks:
+            return frame
+            
+        # Baş duruşunu hesapla
+        vis_frame, angles = self.calculate_head_pose(landmarks, frame.copy())
+        pitch, yaw, roll = angles
+        
+        if show_axes:
+            # Eksenleri çiz
+            vis_frame = self.draw_head_pose_axes(vis_frame, landmarks)
+        
+        if show_angles:
+            # Açıları göster
+            for i, info in enumerate(zip(('pitch', 'yaw', 'roll'), angles)):
+                k, v = info
+                text = f"{k}: {int(v)}"
+                cv2.putText(vis_frame, text, (20, i*30 + 20),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 0, 200), 2)
+        
+        return vis_frame
+    
     def release(self):
         """Release MediaPipe resources."""
         self.face_mesh.close()
@@ -736,108 +931,86 @@ def get_mediapipe_face_mesh() -> MediaPipeUtils:
     """
     return MediaPipeUtils()
 
+# Load UI configuration from YAML file
 def load_ui_config() -> Dict:
     """
-    Load UI configuration parameters from the config file.
-    
-    This function reads the config.yaml file and extracts UI-related parameters
-    such as colors, widget sizes, progress bar thresholds, etc.
+    Load UI configuration from YAML file.
     
     Returns:
-        Dict: Dictionary containing UI configuration parameters
+        Dict: UI configuration dictionary
     """
     import yaml
     import os
-    from pathlib import Path
     
-    # Get the project root directory (assuming this file is in src/utils)
-    project_root = Path(__file__).parent.parent.parent
-    config_path = os.path.join(project_root, 'config', 'config.yaml')
+    # Get the project root directory
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    config_path = os.path.join(project_root, 'config', 'ui_config.yaml')
     
-    # Load the config file
-    with open(config_path, 'r') as config_file:
-        config = yaml.safe_load(config_file)
-    
-    # Create UI config dictionary with default values if not present in the config file
-    ui_config = {
-        # Main window parameters
-        'window': {
-            'title': config.get('ui', {}).get('window', {}).get('title', 'Sürücü Uykululuk Tespit Sistemi'),
-            'width': config.get('ui', {}).get('window', {}).get('width', 1280),
-            'height': config.get('ui', {}).get('window', {}).get('height', 800),
-            'min_width': config.get('ui', {}).get('window', {}).get('min_width', 800),
-            'min_height': config.get('ui', {}).get('window', {}).get('min_height', 600),
-        },
-        
-        # Video frame parameters
-        'video_frame': {
-            'width': config.get('ui', {}).get('video_frame', {}).get('width', 640),
-            'height': config.get('ui', {}).get('video_frame', {}).get('height', 480),
-        },
-        
-        # Indicator parameters
-        'indicators': {
-            'ear': {
-                'critical_threshold': config.get('detection', {}).get('ear_threshold', 0.21),
-                'warning_threshold': config.get('detection', {}).get('ear_threshold', 0.21) + 0.05,
-                'normal_color': config.get('ui', {}).get('indicators', {}).get('normal_color', '#00FF00'),
-                'warning_color': config.get('ui', {}).get('indicators', {}).get('warning_color', '#FFFF00'),
-                'critical_color': config.get('ui', {}).get('indicators', {}).get('critical_color', '#FF0000'),
+    try:
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        return config
+    except Exception as e:
+        print(f"Error loading UI config: {e}")
+        # Return default configuration
+        return {
+            'window': {
+                'title': 'Sürücü Uykululuk Tespiti',
+                'width': 1200,
+                'height': 800,
+                'min_width': 800,
+                'min_height': 600
             },
-            'mar': {
-                'critical_threshold': config.get('detection', {}).get('mar_threshold', 0.65),
-                'warning_threshold': config.get('detection', {}).get('mar_threshold', 0.65) - 0.1,
-                'normal_color': config.get('ui', {}).get('indicators', {}).get('normal_color', '#00FF00'),
-                'warning_color': config.get('ui', {}).get('indicators', {}).get('warning_color', '#FFFF00'),
-                'critical_color': config.get('ui', {}).get('indicators', {}).get('critical_color', '#FF0000'),
+            'video_frame': {
+                'width': 640,
+                'height': 480
             },
-            'perclos': {
-                'critical_threshold': config.get('detection', {}).get('perclos', {}).get('threshold', 15.0),
-                'warning_threshold': config.get('detection', {}).get('perclos', {}).get('threshold', 15.0) - 5.0,
-                'normal_color': config.get('ui', {}).get('indicators', {}).get('normal_color', '#00FF00'),
-                'warning_color': config.get('ui', {}).get('indicators', {}).get('warning_color', '#FFFF00'),
-                'critical_color': config.get('ui', {}).get('indicators', {}).get('critical_color', '#FF0000'),
+            'layout': {
+                'margin': 10,
+                'padding': 5,
+                'spacing': 10
             },
-            'progress_bar_height': config.get('ui', {}).get('indicators', {}).get('progress_bar_height', 20),
-            'label_width': config.get('ui', {}).get('indicators', {}).get('label_width', 80),
-        },
-        
-        # Chart parameters
-        'chart': {
-            'update_interval': config.get('ui', {}).get('chart', {}).get('update_interval', 100),  # ms
-            'history_duration': config.get('drowsiness', {}).get('history_duration', 5.0),  # seconds
-            'y_range_ear': config.get('ui', {}).get('chart', {}).get('y_range_ear', [0, 0.5]),
-            'y_range_mar': config.get('ui', {}).get('chart', {}).get('y_range_mar', [0, 1.0]),
-            'y_range_perclos': config.get('ui', {}).get('chart', {}).get('y_range_perclos', [0, 100]),
-            'line_width': config.get('ui', {}).get('chart', {}).get('line_width', 2),
-            'ear_color': config.get('ui', {}).get('chart', {}).get('ear_color', '#0000FF'),
-            'mar_color': config.get('ui', {}).get('chart', {}).get('mar_color', '#FF00FF'),
-            'perclos_color': config.get('ui', {}).get('chart', {}).get('perclos_color', '#FF5500'),
-        },
-        
-        # Control area parameters
-        'controls': {
-            'button_width': config.get('ui', {}).get('controls', {}).get('button_width', 120),
-            'button_height': config.get('ui', {}).get('controls', {}).get('button_height', 40),
-            'button_margin': config.get('ui', {}).get('controls', {}).get('button_margin', 10),
-            'font_size': config.get('ui', {}).get('controls', {}).get('font_size', 12),
-        },
-        
-        # Font parameters
-        'fonts': {
-            'family': config.get('ui', {}).get('fonts', {}).get('family', 'Arial'),
-            'title_size': config.get('ui', {}).get('fonts', {}).get('title_size', 16),
-            'label_size': config.get('ui', {}).get('fonts', {}).get('label_size', 12),
-            'status_size': config.get('ui', {}).get('fonts', {}).get('status_size', 10),
-        },
-        
-        # Margins and spacing
-        'layout': {
-            'margin': config.get('ui', {}).get('layout', {}).get('margin', 10),
-            'spacing': config.get('ui', {}).get('layout', {}).get('spacing', 5),
-            'padding': config.get('ui', {}).get('layout', {}).get('padding', 8),
-            'dock_width': config.get('ui', {}).get('layout', {}).get('dock_width', 200),
+            'fonts': {
+                'family': 'Arial',
+                'title_size': 14,
+                'label_size': 12,
+                'value_size': 16
+            },
+            'controls': {
+                'button_width': 120,
+                'button_height': 40
+            },
+            'indicators': {
+                'ear': {
+                    'min': 0.0,
+                    'max': 0.4,
+                    'warning_threshold': 0.25,
+                    'critical_threshold': 0.21
+                },
+                'mar': {
+                    'min': 0.0,
+                    'max': 1.0,
+                    'warning_threshold': 0.7,
+                    'critical_threshold': 0.8
+                },
+                'perclos': {
+                    'min': 0.0,
+                    'max': 100.0,
+                    'warning_threshold': 15.0,
+                    'critical_threshold': 20.0
+                }
+            },
+            'chart': {
+                'history_duration': 30,
+                'line_width': 2,
+                'y_range_ear': [0.0, 0.4],
+                'y_range_mar': [0.0, 1.0],
+                'y_range_perclos': [0.0, 100.0]
+            },
+            'camera': {
+                'device': 0,
+                'width': 640,
+                'height': 480,
+                'fps': 30
+            }
         }
-    }
-    
-    return ui_config
