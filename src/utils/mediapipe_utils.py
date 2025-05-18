@@ -12,6 +12,8 @@ import cv2
 import numpy as np
 import mediapipe as mp
 import math
+import os
+import onnxruntime
 from typing import List, Tuple, Dict, Optional, Union
 
 class MediaPipeUtils:
@@ -48,13 +50,153 @@ class MediaPipeUtils:
     
     # 3D model noktaları (estimator.py'den alındı)
     MODEL_POINTS = np.array([
-        [285, 528, 200],
-        [285, 371, 152],
-        [197, 574, 128],
-        [173, 425, 108],
-        [360, 574, 128],
-        [391, 425, 108]
+        [0.0, 0.0, 0.0],           # Burun ucu (origin)
+        [0.0, -330.0, -65.0],      # Çene
+        [-225.0, 170.0, -135.0],   # Sol göz sol köşesi
+        [-150.0, -150.0, -125.0],  # Sol ağız köşesi
+        [225.0, 170.0, -135.0],    # Sağ göz sağ köşesi
+        [150.0, -150.0, -125.0]    # Sağ ağız köşesi
     ], dtype=np.float64)
+    
+    # Detaylı 3D yüz modeli (58 nokta)
+    DETAILED_MODEL_POINTS = np.array([
+        [-7.308957, 0.913869, 0.000000],  # 0
+        [-6.775290, -0.730814, -0.012799],  # 1
+        [-5.665918, -3.286078, 1.022951],  # 2
+        [-5.011779, -4.876396, 1.047961],  # 3
+        [-4.056931, -5.947019, 1.636229],  # 4
+        [-1.833492, -7.056977, 4.061275],  # 5
+        [0.000000, -7.415691, 4.070434],  # 6
+        [1.833492, -7.056977, 4.061275],  # 7
+        [4.056931, -5.947019, 1.636229],  # 8
+        [5.011779, -4.876396, 1.047961],  # 9
+        [5.665918, -3.286078, 1.022951],  # 10
+        [6.775290, -0.730814, -0.012799],  # 11
+        [7.308957, 0.913869, 0.000000],  # 12
+        [5.311432, 5.485328, 3.987654],  # 13
+        [4.461908, 6.189018, 5.594410],  # 14
+        [3.550622, 6.185143, 5.712299],  # 15
+        [2.542231, 5.862829, 4.687939],  # 16
+        [1.789930, 5.393625, 4.413414],  # 17
+        [2.693583, 5.018237, 5.072837],  # 18
+        [3.530191, 4.981603, 4.937805],  # 19
+        [4.490323, 5.186498, 4.694397],  # 20
+        [-5.311432, 5.485328, 3.987654],  # 21
+        [-4.461908, 6.189018, 5.594410],  # 22
+        [-3.550622, 6.185143, 5.712299],  # 23
+        [-2.542231, 5.862829, 4.687939],  # 24
+        [-1.789930, 5.393625, 4.413414],  # 25
+        [-2.693583, 5.018237, 5.072837],  # 26
+        [-3.530191, 4.981603, 4.937805],  # 27
+        [-4.490323, 5.186498, 4.694397],  # 28
+        [1.330353, 7.122144, 6.903745],  # 29
+        [2.533424, 7.878085, 7.451034],  # 30
+        [4.861131, 7.878672, 6.601275],  # 31
+        [6.137002, 7.271266, 5.200823],  # 32
+        [6.825897, 6.760612, 4.402142],  # 33
+        [-1.330353, 7.122144, 6.903745],  # 34
+        [-2.533424, 7.878085, 7.451034],  # 35
+        [-4.861131, 7.878672, 6.601275],  # 36
+        [-6.137002, 7.271266, 5.200823],  # 37
+        [-6.825897, 6.760612, 4.402142],  # 38
+        [-2.774015, -2.080775, 5.048531],  # 39
+        [-0.509714, -1.571179, 6.566167],  # 40
+        [0.000000, -1.646444, 6.704956],  # 41
+        [0.509714, -1.571179, 6.566167],  # 42
+        [2.774015, -2.080775, 5.048531],  # 43
+        [0.589441, -2.958597, 6.109526],  # 44
+        [0.000000, -3.116408, 6.097667],  # 45
+        [-0.589441, -2.958597, 6.109526],  # 46
+        [-0.981972, 4.554081, 6.301271],  # 47
+        [-0.973987, 1.916389, 7.654050],  # 48
+        [-2.005628, 1.409845, 6.165652],  # 49
+        [-1.930245, 0.424351, 5.914376],  # 50
+        [-0.746313, 0.348381, 6.263227],  # 51
+        [0.000000, 0.000000, 6.763430],  # 52 BURUN UCU
+        [0.746313, 0.348381, 6.263227],  # 53
+        [1.930245, 0.424351, 5.914376],  # 54
+        [2.005628, 1.409845, 6.165652],  # 55
+        [0.973987, 1.916389, 7.654050],  # 56
+        [0.981972, 4.554081, 6.301271]   # 57
+    ], dtype=np.float64)
+    
+    # Detaylı model için MediaPipe yüz işaretleri eşleştirmesi
+    # Bu indeksler, MediaPipe'ın 468 yüz işareti ile 58 noktalı modeli eşleştirir
+    # Şu anda sadece yaklaşık bir eşleştirme, geliştirilebilir
+    DETAILED_MODEL_MEDIAPIPE_MAPPING = [
+        10,    # 0 - yüz konturu sol üst
+        152,   # 1 - yüz konturu sol alt
+        162,   # 2 - çene sol
+        169,   # 3 - çene sol orta
+        186,   # 4 - çene sol iç
+        200,   # 5 - çene orta sol
+        199,   # 6 - çene orta
+        175,   # 7 - çene orta sağ
+        201,   # 8 - çene sağ iç
+        208,   # 9 - çene sağ orta
+        21,    # 10 - çene sağ
+        127,   # 11 - yüz konturu sağ alt
+        338,   # 12 - yüz konturu sağ üst
+        297,   # 13 - sağ kaş dış
+        299,   # 14 - sağ kaş dış orta
+        296,   # 15 - sağ kaş orta dış
+        336,   # 16 - sağ kaş orta
+        334,   # 17 - sağ kaş orta iç
+        293,   # 18 - sağ kaş iç orta
+        276,   # 19 - sağ kaş iç
+        283,   # 20 - sağ kaş iç üst
+        70,    # 21 - sol kaş dış
+        63,    # 22 - sol kaş dış orta
+        105,   # 23 - sol kaş orta dış
+        66,    # 24 - sol kaş orta
+        107,   # 25 - sol kaş orta iç
+        55,    # 26 - sol kaş iç orta
+        65,    # 27 - sol kaş iç
+        52,    # 28 - sol kaş iç üst
+        336,   # 29 - sağ göz üst orta
+        296,   # 30 - sağ göz üst iç
+        334,   # 31 - sağ göz üst dış
+        293,   # 32 - sağ göz alt dış
+        276,   # 33 - sağ göz alt orta
+        107,   # 34 - sol göz üst orta
+        66,    # 35 - sol göz üst iç
+        105,   # 36 - sol göz üst dış
+        55,    # 37 - sol göz alt dış
+        65,    # 38 - sol göz alt orta
+        329,   # 39 - burun kökü sağ
+        98,    # 40 - burun kökü sağ orta
+        19,    # 41 - burun kökü orta
+        97,    # 42 - burun kökü sol orta
+        100,   # 43 - burun kökü sol
+        209,   # 44 - burun orta sağ
+        94,    # 45 - burun orta
+        205,   # 46 - burun orta sol
+        360,   # 47 - burun üst sağ
+        344,   # 48 - burun üst sağ orta
+        370,   # 49 - burun üst orta sağ
+        4,     # 50 - burun üst orta
+        438,   # 51 - burun üst orta sol
+        1,     # 52 - burun ucu
+        19,    # 53 - burun alt orta sağ
+        2,     # 54 - burun alt orta
+        94,    # 55 - burun alt orta sol
+        141,   # 56 - burun alt sağ
+        218    # 57 - burun alt sol
+    ]
+    
+    # ETH-XGaze için yüz modeli (3D landmark noktaları)
+    GAZE_FACE_MODEL = np.array([
+        [-34.04, 39.55, 57.49],  # Sağ göz dış köşesi
+        [-16.1, 42.4, 67.53],    # Sağ göz iç köşesi
+        [16.1, 42.4, 67.53],     # Sol göz iç köşesi
+        [34.04, 39.55, 57.49],   # Sol göz dış köşesi
+        [0.0, 0.0, 8.0],         # Burun ucu
+        [0.0, -48.0, 21.0],      # Çene ucu
+    ])
+    
+    # ETH-XGaze için önemli yüz noktaları
+    # Sırasıyla: Sağ göz dış köşesi, Sağ göz iç köşesi, Sol göz iç köşesi, Sol göz dış köşesi, Burun ucu, Çene ucu
+    GAZE_LANDMARK_INDICES = [33, 133, 362, 263, 1, 199]
     
     def __init__(self, 
                 static_image_mode: bool = False, 
@@ -80,6 +222,18 @@ class MediaPipeUtils:
             min_detection_confidence=min_detection_confidence,
             min_tracking_confidence=min_tracking_confidence
         )
+        
+        # ONNX model yükleme
+        self.model_path = os.path.join('models', 'eth_xgaze_model.onnx')
+        if os.path.exists(self.model_path):
+            self.onnx_session = onnxruntime.InferenceSession(self.model_path)
+            print(f"ONNX model yüklendi: {self.model_path}")
+        else:
+            print(f"UYARI: ONNX model bulunamadı: {self.model_path}")
+            self.onnx_session = None
+            
+        # Varsayılan olarak basit modeli kullan
+        self.use_detailed_model = False
     
     def detect_face_landmarks(self, frame: np.ndarray) -> Tuple[List[List[float]], bool]:
         """
@@ -754,20 +908,40 @@ class MediaPipeUtils:
             
         h, w, c = frame.shape
         
-        # 2D landmark noktalarını al (estimator.py'den alınan indeksler)
-        face_coordination_in_image = []
-        for idx in self.HEAD_POSE_LANDMARKS:
-            if idx < len(landmarks):
-                x, y = int(landmarks[idx][0]), int(landmarks[idx][1])
-                face_coordination_in_image.append([x, y])
-                # Baş duruşu hesaplama için kullanılan noktaları vurgula
-                cv2.circle(frame, (x, y), 3, (0, 0, 255), -1)
-        
-        # Nokta sayısı yetersizse işleme devam etme
-        if len(face_coordination_in_image) != len(self.HEAD_POSE_LANDMARKS):
-            return frame, (0, 0, 0)
+        if self.use_detailed_model:
+            # Detaylı model için 2D landmark noktalarını al
+            face_coordination_in_image = []
+            for idx in self.DETAILED_MODEL_MEDIAPIPE_MAPPING:
+                if idx < len(landmarks):
+                    x, y = int(landmarks[idx][0]), int(landmarks[idx][1])
+                    face_coordination_in_image.append([x, y])
+                    # Baş duruşu hesaplama için kullanılan noktaları vurgula
+                    cv2.circle(frame, (x, y), 2, (0, 255, 255), -1)
             
-        face_coordination_in_image = np.array(face_coordination_in_image, dtype=np.float64)
+            # Nokta sayısı yetersizse basit modele geri dön
+            if len(face_coordination_in_image) != len(self.DETAILED_MODEL_MEDIAPIPE_MAPPING):
+                print(f"Detaylı model için yeterli nokta bulunamadı ({len(face_coordination_in_image)}/{len(self.DETAILED_MODEL_MEDIAPIPE_MAPPING)}). Basit modele dönülüyor.")
+                self.use_detailed_model = False
+                return self.calculate_head_pose(landmarks, frame)
+                
+            face_coordination_in_image = np.array(face_coordination_in_image, dtype=np.float64)
+            model_points = self.DETAILED_MODEL_POINTS
+        else:
+            # Basit model için 2D landmark noktalarını al
+            face_coordination_in_image = []
+            for idx in self.HEAD_POSE_LANDMARKS:
+                if idx < len(landmarks):
+                    x, y = int(landmarks[idx][0]), int(landmarks[idx][1])
+                    face_coordination_in_image.append([x, y])
+                    # Baş duruşu hesaplama için kullanılan noktaları vurgula
+                    cv2.circle(frame, (x, y), 3, (0, 0, 255), -1)
+            
+            # Nokta sayısı yetersizse işleme devam etme
+            if len(face_coordination_in_image) != len(self.HEAD_POSE_LANDMARKS):
+                return frame, (0, 0, 0)
+                
+            face_coordination_in_image = np.array(face_coordination_in_image, dtype=np.float64)
+            model_points = self.MODEL_POINTS
         
         # Kamera matrisi güncelle
         focal_length = 1 * w
@@ -782,7 +956,7 @@ class MediaPipeUtils:
         
         # SolvePnP ile rotasyon vektörünü ve translasyon vektörünü hesapla
         success, rotation_vec, translation_vec = cv2.solvePnP(
-            self.MODEL_POINTS, face_coordination_in_image, cam_matrix, dist_matrix)
+            model_points, face_coordination_in_image, cam_matrix, dist_matrix)
         
         if not success:
             return frame, (0, 0, 0)
@@ -813,6 +987,145 @@ class MediaPipeUtils:
         # Derece cinsine çevir
         return (x * 180.0 / math.pi, y * 180.0 / math.pi, z * 180.0 / math.pi)
     
+    def draw_head_pose_cube(self, frame: np.ndarray, landmarks: List[List[float]], 
+                           cube_size: int = None) -> np.ndarray:
+        """
+        Baş duruşunu temsil eden bir küp çiz
+        
+        Args:
+            frame: Görüntü karesi
+            landmarks: Yüz işaretleri
+            cube_size: Küp boyutu (None ise yüz boyutuna göre otomatik ayarlanır)
+            
+        Returns:
+            np.ndarray: Küp eklenmiş görüntü
+        """
+        if not landmarks:
+            return frame
+            
+        h, w, c = frame.shape
+        
+        # Kullanılacak model ve indeksleri belirle
+        if self.use_detailed_model:
+            landmark_indices = self.DETAILED_MODEL_MEDIAPIPE_MAPPING
+            model_points = self.DETAILED_MODEL_POINTS
+        else:
+            landmark_indices = self.HEAD_POSE_LANDMARKS
+            model_points = self.MODEL_POINTS
+        
+        # 2D landmark noktalarını al
+        face_coordination_in_image = []
+        for idx in landmark_indices:
+            if idx < len(landmarks):
+                x, y = int(landmarks[idx][0]), int(landmarks[idx][1])
+                face_coordination_in_image.append([x, y])
+        
+        # Nokta sayısı yetersizse işleme devam etme
+        if len(face_coordination_in_image) != len(landmark_indices):
+            return frame
+            
+        face_coordination_in_image = np.array(face_coordination_in_image, dtype=np.float64)
+        
+        # Kamera matrisi güncelle
+        focal_length = 1 * w
+        cam_matrix = np.array([
+            [focal_length, 0, w / 2],
+            [0, focal_length, h / 2],
+            [0, 0, 1]
+        ], dtype=np.float64)
+        
+        # Distorsiyon katsayıları
+        dist_matrix = np.zeros((4, 1), dtype=np.float64)
+        
+        # SolvePnP ile rotasyon vektörünü ve translasyon vektörünü hesapla
+        success, rotation_vec, translation_vec = cv2.solvePnP(
+            model_points, face_coordination_in_image, cam_matrix, dist_matrix)
+        
+        if not success:
+            return frame
+        
+        # Burun ucunu bul (indeks 1) ve küpün merkezi olarak kullan
+        nose_tip = None
+        if 1 < len(landmarks):
+            nose_tip = (int(landmarks[1][0]), int(landmarks[1][1]))
+        else:
+            # Burun ucu bulunamadıysa, yüzün merkezini kullan
+            face_rect = self.get_face_rect(landmarks)
+            nose_tip = (face_rect[0] + face_rect[2] // 2, face_rect[1] + face_rect[3] // 2)
+        
+        # Yüz boyutunu hesapla
+        if cube_size is None:
+            # Yüzün genişliğini ve yüksekliğini hesapla
+            # Yüz konturu noktalarını kullanarak daha doğru bir yüz boyutu hesapla
+            face_contour_points = []
+            for idx in self.FACE_CONTOUR_INDICES:
+                if idx < len(landmarks):
+                    face_contour_points.append([landmarks[idx][0], landmarks[idx][1]])
+            
+            if face_contour_points:
+                # Kontur noktalarından min/max değerleri bul
+                x_coords = [p[0] for p in face_contour_points]
+                y_coords = [p[1] for p in face_contour_points]
+                min_x, max_x = min(x_coords), max(x_coords)
+                min_y, max_y = min(y_coords), max(y_coords)
+                
+                face_width = max_x - min_x
+                face_height = max_y - min_y
+            else:
+                # Kontur noktaları bulunamazsa get_face_rect kullan
+                face_rect = self.get_face_rect(landmarks)
+                face_width = face_rect[2]
+                face_height = face_rect[3]
+            
+            # Küp boyutunu yüz boyutuna göre ayarla (yüz genişliğinin %120'si)
+            cube_size = int(max(face_width, face_height) * 1.2)
+            
+            # Minimum ve maksimum değerler belirle
+            cube_size = max(150, min(cube_size, 400))  # 150 ile 400 arasında sınırla
+        
+        # Yüzün etrafında bir küp oluştur
+        half_size = cube_size / 2
+        
+        # Küp köşe noktaları (3D) - burun ucunu merkez alarak
+        cube_points = np.array([
+            # Ön yüz (z = -half_size)
+            [-half_size, -half_size, -half_size],  # Sol üst ön
+            [half_size, -half_size, -half_size],   # Sağ üst ön
+            [half_size, half_size, -half_size],    # Sağ alt ön
+            [-half_size, half_size, -half_size],   # Sol alt ön
+            
+            # Arka yüz (z = half_size)
+            [-half_size, -half_size, half_size],   # Sol üst arka
+            [half_size, -half_size, half_size],    # Sağ üst arka
+            [half_size, half_size, half_size],     # Sağ alt arka
+            [-half_size, half_size, half_size]     # Sol alt arka
+        ], dtype=np.float32)
+        
+        # Küp köşe noktalarını 2D'ye projeksiyon yap
+        cube_2d, jac = cv2.projectPoints(cube_points, rotation_vec, translation_vec, cam_matrix, dist_matrix)
+        cube_2d = cube_2d.astype(int)
+        
+        # Küp kenarlarını çiz
+        # Ön yüz
+        frame = cv2.line(frame, tuple(cube_2d[0][0]), tuple(cube_2d[1][0]), (0, 255, 0), 2)  # Üst
+        frame = cv2.line(frame, tuple(cube_2d[1][0]), tuple(cube_2d[2][0]), (0, 255, 0), 2)  # Sağ
+        frame = cv2.line(frame, tuple(cube_2d[2][0]), tuple(cube_2d[3][0]), (0, 255, 0), 2)  # Alt
+        frame = cv2.line(frame, tuple(cube_2d[3][0]), tuple(cube_2d[0][0]), (0, 255, 0), 2)  # Sol
+        
+        # Arka yüz
+        frame = cv2.line(frame, tuple(cube_2d[4][0]), tuple(cube_2d[5][0]), (0, 0, 255), 2)  # Üst
+        frame = cv2.line(frame, tuple(cube_2d[5][0]), tuple(cube_2d[6][0]), (0, 0, 255), 2)  # Sağ
+        frame = cv2.line(frame, tuple(cube_2d[6][0]), tuple(cube_2d[7][0]), (0, 0, 255), 2)  # Alt
+        frame = cv2.line(frame, tuple(cube_2d[7][0]), tuple(cube_2d[4][0]), (0, 0, 255), 2)  # Sol
+        
+        # Bağlantı kenarları
+        frame = cv2.line(frame, tuple(cube_2d[0][0]), tuple(cube_2d[4][0]), (255, 0, 0), 2)  # Sol üst
+        frame = cv2.line(frame, tuple(cube_2d[1][0]), tuple(cube_2d[5][0]), (255, 0, 0), 2)  # Sağ üst
+        frame = cv2.line(frame, tuple(cube_2d[2][0]), tuple(cube_2d[6][0]), (255, 0, 0), 2)  # Sağ alt
+        frame = cv2.line(frame, tuple(cube_2d[3][0]), tuple(cube_2d[7][0]), (255, 0, 0), 2)  # Sol alt
+        
+        return frame
+    
     def draw_head_pose_axes(self, frame: np.ndarray, landmarks: List[List[float]], 
                            length: int = 50) -> np.ndarray:
         """
@@ -831,15 +1144,23 @@ class MediaPipeUtils:
             
         h, w, c = frame.shape
         
+        # Kullanılacak model ve indeksleri belirle
+        if self.use_detailed_model:
+            landmark_indices = self.DETAILED_MODEL_MEDIAPIPE_MAPPING
+            model_points = self.DETAILED_MODEL_POINTS
+        else:
+            landmark_indices = self.HEAD_POSE_LANDMARKS
+            model_points = self.MODEL_POINTS
+        
         # 2D landmark noktalarını al
         face_coordination_in_image = []
-        for idx in self.HEAD_POSE_LANDMARKS:
+        for idx in landmark_indices:
             if idx < len(landmarks):
                 x, y = int(landmarks[idx][0]), int(landmarks[idx][1])
                 face_coordination_in_image.append([x, y])
         
         # Nokta sayısı yetersizse işleme devam etme
-        if len(face_coordination_in_image) != len(self.HEAD_POSE_LANDMARKS):
+        if len(face_coordination_in_image) != len(landmark_indices):
             return frame
             
         face_coordination_in_image = np.array(face_coordination_in_image, dtype=np.float64)
@@ -857,10 +1178,19 @@ class MediaPipeUtils:
         
         # SolvePnP ile rotasyon vektörünü ve translasyon vektörünü hesapla
         success, rotation_vec, translation_vec = cv2.solvePnP(
-            self.MODEL_POINTS, face_coordination_in_image, cam_matrix, dist_matrix)
+            model_points, face_coordination_in_image, cam_matrix, dist_matrix)
         
         if not success:
             return frame
+        
+        # Burun ucunu bul (indeks 1) ve eksenlerin orijini olarak kullan
+        nose_tip = None
+        if 1 < len(landmarks):
+            nose_tip = (int(landmarks[1][0]), int(landmarks[1][1]))
+        else:
+            # Burun ucu bulunamadıysa, yüzün merkezini kullan
+            face_rect = self.get_face_rect(landmarks)
+            nose_tip = (face_rect[0] + face_rect[2] // 2, face_rect[1] + face_rect[3] // 2)
             
         # Eksen noktalarını oluştur
         axis_points = np.array([
@@ -874,38 +1204,58 @@ class MediaPipeUtils:
         imgpts, jac = cv2.projectPoints(axis_points, rotation_vec, translation_vec, cam_matrix, dist_matrix)
         imgpts = imgpts.astype(int)
         
+        # Eksenlerin yönlerini hesapla
+        origin = nose_tip
+        x_end = (origin[0] + int(imgpts[1][0][0] - imgpts[0][0][0]), 
+                origin[1] + int(imgpts[1][0][1] - imgpts[0][0][1]))
+        
+        y_end = (origin[0] + int(imgpts[2][0][0] - imgpts[0][0][0]), 
+                origin[1] + int(imgpts[2][0][1] - imgpts[0][0][1]))
+        
+        z_end = (origin[0] + int(imgpts[3][0][0] - imgpts[0][0][0]), 
+                origin[1] + int(imgpts[3][0][1] - imgpts[0][0][1]))
+        
         # Eksenleri çiz
-        origin = tuple(imgpts[0].ravel())
-        frame = cv2.line(frame, origin, tuple(imgpts[1].ravel()), (0, 0, 255), 3)  # X ekseni - Kırmızı
-        frame = cv2.line(frame, origin, tuple(imgpts[2].ravel()), (0, 255, 0), 3)  # Y ekseni - Yeşil
-        frame = cv2.line(frame, origin, tuple(imgpts[3].ravel()), (255, 0, 0), 3)  # Z ekseni - Mavi
+        frame = cv2.line(frame, origin, x_end, (0, 0, 255), 3)  # X ekseni - Kırmızı
+        frame = cv2.line(frame, origin, y_end, (0, 255, 0), 3)  # Y ekseni - Yeşil
+        frame = cv2.line(frame, origin, z_end, (255, 0, 0), 3)  # Z ekseni - Mavi
         
         return frame
     
     def visualize_head_pose(self, frame: np.ndarray, landmarks: List[List[float]], 
-                           show_axes: bool = True, show_angles: bool = True) -> np.ndarray:
+                           show_axes: bool = True, show_angles: bool = True,
+                           visualization_type: str = 'cube',
+                           use_detailed_model: bool = False) -> np.ndarray:
         """
         Baş duruşunu görselleştir
         
         Args:
             frame: Görüntü karesi
             landmarks: Yüz işaretleri
-            show_axes: Eksenleri göster
+            show_axes: Görselleştirmeyi göster
             show_angles: Açıları göster
+            visualization_type: Görselleştirme tipi ('cube' veya 'axes')
+            use_detailed_model: Detaylı 3D modeli kullan
             
         Returns:
             np.ndarray: Görselleştirilmiş görüntü
         """
         if not landmarks:
             return frame
+        
+        # Detaylı model kullanımını ayarla
+        self.use_detailed_model = use_detailed_model
             
         # Baş duruşunu hesapla
         vis_frame, angles = self.calculate_head_pose(landmarks, frame.copy())
         pitch, yaw, roll = angles
         
         if show_axes:
-            # Eksenleri çiz
-            vis_frame = self.draw_head_pose_axes(vis_frame, landmarks)
+            # Görselleştirme tipine göre çiz
+            if visualization_type.lower() == 'cube':
+                vis_frame = self.draw_head_pose_cube(vis_frame, landmarks)
+            else:
+                vis_frame = self.draw_head_pose_axes(vis_frame, landmarks)
         
         if show_angles:
             # Açıları göster
@@ -920,6 +1270,275 @@ class MediaPipeUtils:
     def release(self):
         """Release MediaPipe resources."""
         self.face_mesh.close()
+    
+    def estimate_head_pose(self, landmarks: List[List[float]], frame: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Baş duruşunu tahmin et
+        
+        Args:
+            landmarks: 2D yüz işaret noktaları
+            frame: Giriş görüntüsü
+            
+        Returns:
+            rvec, tvec: Rotasyon ve translasyon vektörleri
+        """
+        # Kamera matrisini ve distorsiyon katsayılarını hesapla
+        h, w = frame.shape[:2]
+        focal_length = w
+        center = (w / 2, h / 2)
+        camera_matrix = np.array(
+            [[focal_length, 0, center[0]],
+             [0, focal_length, center[1]],
+             [0, 0, 1]], dtype=np.float64
+        )
+        distortion = np.zeros((4, 1), dtype=np.float64)
+        
+        # Gaze için kullanılan 6 noktayı al
+        landmarks_2d = []
+        for idx in self.GAZE_LANDMARK_INDICES:
+            if idx < len(landmarks):
+                landmarks_2d.append([landmarks[idx][0], landmarks[idx][1]])
+        
+        landmarks_2d = np.array(landmarks_2d, dtype=np.float64)
+        
+        # SolvePnP ile baş duruşunu hesapla
+        if len(landmarks_2d) == 6:  # Tüm noktalar bulundu
+            ret, rvec, tvec = cv2.solvePnP(
+                self.GAZE_FACE_MODEL, 
+                landmarks_2d, 
+                camera_matrix, 
+                distortion, 
+                flags=cv2.SOLVEPNP_EPNP
+            )
+            
+            # Daha fazla optimize et
+            ret, rvec, tvec = cv2.solvePnP(
+                self.GAZE_FACE_MODEL, 
+                landmarks_2d, 
+                camera_matrix, 
+                distortion, 
+                rvec, tvec, 
+                True
+            )
+            
+            return rvec, tvec
+        
+        # Yeterli nokta bulunamadı
+        return np.zeros((3, 1), dtype=np.float64), np.zeros((3, 1), dtype=np.float64)
+    
+    def normalize_face(self, img: np.ndarray, landmarks: List[List[float]], frame: np.ndarray) -> np.ndarray:
+        """
+        Yüz görüntüsünü normalize et (ETH-XGaze'den uyarlandı)
+        
+        Args:
+            img: Giriş görüntüsü
+            landmarks: 2D yüz işaret noktaları
+            frame: Orijinal kare
+            
+        Returns:
+            img_normalized: Normalize edilmiş yüz görüntüsü
+        """
+        # Baş duruşunu tahmin et
+        hr, ht = self.estimate_head_pose(landmarks, frame)
+        
+        # Kamera matrisini hesapla
+        h, w = frame.shape[:2]
+        focal_length = w
+        center = (w / 2, h / 2)
+        camera_matrix = np.array(
+            [[focal_length, 0, center[0]],
+             [0, focal_length, center[1]],
+             [0, 0, 1]], dtype=np.float64
+        )
+        
+        # Normalize edilmiş kamera parametreleri
+        focal_norm = 960  # Normalize edilmiş kameranın odak uzaklığı
+        distance_norm = 600  # Göz ve kamera arasındaki normalize edilmiş mesafe
+        roi_size = (224, 224)  # Kırpılmış göz görüntüsünün boyutu
+        
+        # İşaret noktalarının 3D pozisyonlarını hesapla
+        ht = ht.reshape((3, 1))
+        hR = cv2.Rodrigues(hr)[0]  # Rotasyon matrisi
+        Fc = np.dot(hR, self.GAZE_FACE_MODEL.T) + ht  # Yüz modelini döndür ve taşı
+        
+        # Yüz merkezini bul (göz ve burun merkezlerinin ortalaması)
+        two_eye_center = np.mean(Fc[:, 0:4], axis=1).reshape((3, 1))
+        nose_center = np.mean(Fc[:, 4:6], axis=1).reshape((3, 1))
+        face_center = np.mean(np.concatenate((two_eye_center, nose_center), axis=1), axis=1).reshape((3, 1))
+        
+        # Görüntüyü normalize et
+        distance = np.linalg.norm(face_center)  # Göz ve orijinal kamera arasındaki gerçek mesafe
+        
+        z_scale = distance_norm / distance
+        cam_norm = np.array([  # Sanal kameranın iç parametreleri
+            [focal_norm, 0, roi_size[0] / 2],
+            [0, focal_norm, roi_size[1] / 2],
+            [0, 0, 1.0],
+        ])
+        
+        # Dönüşüm matrisini hesapla
+        S = np.array([  # Ölçekleme matrisi
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, z_scale],
+        ])
+        
+        hRx = hR[:, 0]
+        forward = (face_center / distance).reshape(3)
+        down = np.cross(forward, hRx)
+        down /= np.linalg.norm(down)
+        right = np.cross(down, forward)
+        right /= np.linalg.norm(right)
+        
+        R = np.c_[right, down, forward].T  # Rotasyon matrisi
+        
+        # Normalize edilmiş görüntü için dönüşüm matrisini hesapla
+        W = np.dot(np.dot(cam_norm, S), np.dot(R, np.linalg.inv(camera_matrix)))
+        
+        # Görüntüyü dönüştür
+        img_normalized = cv2.warpPerspective(img, W, roi_size)
+        
+        return img_normalized
+    
+    def preprocess_image(self, image: np.ndarray) -> np.ndarray:
+        """
+        ETH-XGaze modeli için görüntüyü ön işleme tabi tut
+        
+        Args:
+            image: Normalize edilmiş yüz görüntüsü (224x224)
+            
+        Returns:
+            processed_img: İşlenmiş görüntü (model girdisi için)
+        """
+        # BGR'dan RGB'ye dönüştür
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        
+        # Görüntüyü yeniden boyutlandır
+        image = cv2.resize(image, (224, 224))
+        
+        # Görüntüyü normalize et ([0,1] aralığına)
+        image = image.astype(np.float32) / 255.0
+        
+        # Ortalama ve standart sapma ile normalize et
+        mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+        std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+        image = (image - mean) / std
+        
+        # Kanalları düzenle (HWC -> CHW)
+        image = image.transpose(2, 0, 1)
+        
+        # Batch boyutu ekle
+        image = np.expand_dims(image, axis=0)
+        
+        return image
+    
+    def predict_gaze(self, frame: np.ndarray, landmarks: List[List[float]]) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Bakış yönünü tahmin et
+        
+        Args:
+            frame: Giriş görüntüsü
+            landmarks: 2D yüz işaret noktaları
+            
+        Returns:
+            gaze_vector: Bakış yönü vektörü (pitch, yaw)
+            normalized_image: Normalize edilmiş yüz görüntüsü
+        """
+        if self.onnx_session is None:
+            # Model yüklü değilse boş vektör döndür
+            return np.zeros(2), None
+        
+        # Yüzü normalize et
+        normalized_image = self.normalize_face(frame, landmarks, frame)
+        
+        # Görüntüyü ön işleme tabi tut
+        processed_img = self.preprocess_image(normalized_image)
+        
+        # Model çıkarımı yap
+        input_name = self.onnx_session.get_inputs()[0].name
+        output_name = self.onnx_session.get_outputs()[0].name
+        gaze = self.onnx_session.run([output_name], {input_name: processed_img})[0]
+        
+        # Bakış yönü vektörünü al (pitch, yaw)
+        gaze_vector = gaze[0]  # [pitch, yaw]
+        
+        return gaze_vector, normalized_image
+    
+    def draw_gaze(self, image: np.ndarray, pitchyaw: np.ndarray, origin: Tuple[int, int], 
+                 length: int = 50, thickness: int = 2, color: Tuple[int, int, int] = (0, 0, 255)) -> np.ndarray:
+        """
+        Bakış yönünü görselleştir
+        
+        Args:
+            image: Giriş görüntüsü
+            pitchyaw: Bakış yönü vektörü (pitch, yaw)
+            origin: Bakış yönü orijin noktası (x, y)
+            length: Ok uzunluğu
+            thickness: Ok kalınlığı
+            color: Ok rengi
+            
+        Returns:
+            image: Bakış yönü çizilmiş görüntü
+        """
+        pitch, yaw = pitchyaw
+        
+        # Pitch ve yaw'ı radyana dönüştür
+        pitch = pitch
+        yaw = yaw
+        
+        # Bakış yönü vektörünü hesapla
+        x = -length * np.sin(yaw) * np.cos(pitch)
+        y = -length * np.sin(pitch)
+        z = -length * np.cos(yaw) * np.cos(pitch)
+        
+        # 3D vektörü 2D'ye projeksiyon
+        point_2d = (int(origin[0] + x), int(origin[1] + y))
+        
+        # Ok çiz
+        cv2.arrowedLine(image, origin, point_2d, color, thickness)
+        
+        return image
+    
+    def visualize_gaze(self, frame: np.ndarray, landmarks: List[List[float]]) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Bakış yönünü tahmin et ve görselleştir
+        
+        Args:
+            frame: Giriş görüntüsü
+            landmarks: 2D yüz işaret noktaları
+            
+        Returns:
+            frame: Bakış yönü çizilmiş görüntü
+            normalized_image: Normalize edilmiş yüz görüntüsü (eğer varsa)
+        """
+        if not landmarks or self.onnx_session is None:
+            return frame, None
+        
+        # Bakış yönünü tahmin et
+        gaze_vector, normalized_image = self.predict_gaze(frame, landmarks)
+        
+        if gaze_vector is None:
+            return frame, None
+        
+        # Burun ucunu bul (bakış yönü orijini olarak)
+        nose_tip = None
+        if 1 < len(landmarks):  # 1 indeksi burun ucudur
+            nose_tip = (int(landmarks[1][0]), int(landmarks[1][1]))
+        
+        # Burun ucu bulunamadıysa, yüzün merkezini kullan
+        if nose_tip is None:
+            face_rect = self.get_face_rect(landmarks)
+            nose_tip = (face_rect[0] + face_rect[2] // 2, face_rect[1] + face_rect[3] // 2)
+        
+        # Bakış yönünü çiz
+        frame = self.draw_gaze(frame, gaze_vector, nose_tip)
+        
+        # Bakış açılarını ekranda göster
+        pitch, yaw = np.rad2deg(gaze_vector)
+        cv2.putText(frame, f"Pitch: {pitch:.1f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        cv2.putText(frame, f"Yaw: {yaw:.1f}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        
+        return frame, normalized_image
 
 # Convenience function to get a preconfigured MediaPipeUtils instance
 def get_mediapipe_face_mesh() -> MediaPipeUtils:
