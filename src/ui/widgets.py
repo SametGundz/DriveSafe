@@ -17,124 +17,98 @@ from PyQt6.QtGui import QFont
 
 class IndicatorWidget(QWidget):
     """
-    Custom widget that combines a label and a progress bar for displaying
-    metrics with thresholds (EAR, MAR, PERCLOS).
+    A widget for displaying a metric with a label, value, progress bar, and status icon.
     
-    Attributes:
-        title_label: Label displaying the indicator name
-        value_label: Label displaying the current value
-        progress_bar: Progress bar visualizing the value
-        last_value: Last value set for this indicator
+    This widget is used for displaying metrics like EAR, MAR, and PERCLOS.
     """
     
-    def __init__(self, title, config, parent=None):
+    def __init__(self, label_text, config):
         """
         Initialize the indicator widget.
         
         Args:
-            title: Title of the indicator (e.g., "EAR", "MAR", "PERCLOS")
-            config: Configuration dictionary containing threshold values and colors
-            parent: Parent widget
+            label_text: Text label for the indicator
+            config: Configuration dictionary
         """
-        super().__init__(parent)
+        super().__init__()
         
-        # Store configuration
-        self.title = title
         self.config = config
+        self.indicator_config = config['indicators'].get(label_text.lower(), {})
+        self.label_text = label_text  # Store the label text for later use
         self.last_value = 0.0
+        self.normalized_value = 0.0  # Normalize edilmiş değeri saklamak için
         
-        # Determine which indicator configuration to use
-        if title.lower() == "ear":
-            self.indicator_config = config['indicators']['ear']
-        elif title.lower() == "mar":
-            self.indicator_config = config['indicators']['mar']
-        elif title.lower() == "perclos":
-            self.indicator_config = config['indicators']['perclos']
-        else:
-            # Default to EAR configuration if title is not recognized
-            self.indicator_config = config['indicators']['ear']
+        # Set up the layout
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(5)
         
-        # UI setup
-        self._setup_ui()
-    
-    def _setup_ui(self):
-        """Setup the widget's UI components."""
-        # Set the layout
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(
-            self.config['layout']['padding'],
-            self.config['layout']['padding'],
-            self.config['layout']['padding'],
-            self.config['layout']['padding']
+        # Create label
+        label = QLabel(label_text)
+        label.setFixedWidth(
+            self.config['indicators'].get('label_width', 80)
         )
-        layout.setSpacing(self.config['layout']['spacing'])
-        
-        # Create header with title and value
-        header_layout = QHBoxLayout()
-        
-        # Title label
-        self.title_label = QLabel(self.title)
-        self.title_label.setFont(QFont(
+        label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        label.setFont(QFont(
             self.config['fonts']['family'],
             self.config['fonts']['label_size'],
             QFont.Weight.Medium
         ))
-        # Use .get() method with a default value of 80 if 'label_width' doesn't exist
-        label_width = self.config.get('indicators', {}).get('label_width', 80)
-        self.title_label.setMinimumWidth(label_width)
-        header_layout.addWidget(self.title_label)
+        layout.addWidget(label)
         
-        # Value label (right-aligned)
+        # Create value display
         self.value_label = QLabel("0.00")
+        self.value_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.value_label.setFixedWidth(50)
         self.value_label.setFont(QFont(
             self.config['fonts']['family'],
-            self.config['fonts']['label_size']
+            self.config['fonts']['value_size'],
+            QFont.Weight.Bold
         ))
-        self.value_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        header_layout.addWidget(self.value_label)
+        layout.addWidget(self.value_label)
         
-        layout.addLayout(header_layout)
+        # Create normalized value label for EAR
+        self.normalized_label = QLabel("")
+        self.normalized_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.normalized_label.setFixedWidth(50)
+        self.normalized_label.setFont(QFont(
+            self.config['fonts']['family'],
+            self.config['fonts']['value_size'] - 1,
+            QFont.Weight.Normal
+        ))
+        # Sadece EAR göstergesi için normalize edilmiş değeri göster
+        if label_text.lower() == "ear":
+            layout.addWidget(self.normalized_label)
+        else:
+            self.normalized_label.setVisible(False)
         
-        # Progress bar
+        # Create progress bar
         self.progress_bar = QProgressBar()
-        # Use default value for progress_bar_height if it doesn't exist
-        progress_bar_height = self.config.get('indicators', {}).get('progress_bar_height', 15)
-        self.progress_bar.setFixedHeight(progress_bar_height)
-        self.progress_bar.setMinimum(0)
-        self.progress_bar.setMaximum(100)
-        self.progress_bar.setValue(0)
         self.progress_bar.setTextVisible(False)
-        
-        # Apply stylesheet for a modern, minimalist progress bar
-        # Use default color if normal_color doesn't exist
-        normal_color = self.indicator_config.get('normal_color', "#34c759")  # Default to green
-        self.progress_bar.setStyleSheet(
-            f"""
-            QProgressBar {{
-                background-color: #f0f0f0;
-                border: none;
-                border-radius: 4px;
-                text-align: center;
-                margin-top: 4px;
-            }}
-            QProgressBar::chunk {{
-                background-color: {normal_color};
-                border-radius: 4px;
-            }}
-            """
+        self.progress_bar.setFixedHeight(
+            self.config['indicators'].get('progress_bar_height', 15)
         )
-        
-        layout.addWidget(self.progress_bar)
-        
-        # Add subtle border around the widget
-        self.setStyleSheet("""
-            IndicatorWidget {
-                background-color: white;
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
                 border: 1px solid #e1e1e1;
-                border-radius: 8px;
-                padding: 4px;
+                border-radius: 4px;
+                background-color: #f5f5f5;
+            }
+            QProgressBar::chunk {
+                background-color: #34c759;
+                border-radius: 3px;
             }
         """)
+        layout.addWidget(self.progress_bar)
+        
+        # Create status icon
+        self.status_icon = QLabel()
+        self.status_icon.setFixedSize(16, 16)
+        self.status_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.status_icon)
+        
+        # Set initial state
+        self.update_value(0.0)
     
     def update_value(self, value, min_val=0.0, max_val=1.0):
         """
@@ -149,12 +123,20 @@ class IndicatorWidget(QWidget):
         self.last_value = value
         
         # Update the value label with appropriate formatting
-        if self.title.lower() == "perclos":
+        if self.label_text.lower() == "perclos":
             # Use 1 decimal place for PERCLOS (percentage)
             self.value_label.setText(f"{value:.1f}%")
         else:
             # Use 3 decimal places for EAR and MAR
             self.value_label.setText(f"{value:.3f}")
+        
+        # Normalize edilmiş değeri göster (sadece EAR için) - Değer varsa
+        if self.label_text.lower() == "ear" and hasattr(self, 'normalized_value') and self.normalized_value is not None:
+            self.normalized_label.setText(f"[{self.normalized_value:.2f}]")
+            self.normalized_label.setStyleSheet("color: #007aff;")  # Apple blue
+        else:
+            if self.label_text.lower() == "ear":
+                self.normalized_label.setText("")
         
         # Map the value to a percentage (0-100) for the progress bar
         percentage = int(((value - min_val) / (max_val - min_val)) * 100)
@@ -162,11 +144,11 @@ class IndicatorWidget(QWidget):
         self.progress_bar.setValue(percentage)
         
         # Update progress bar color based on thresholds
-        critical_threshold = self.indicator_config['critical_threshold']
-        warning_threshold = self.indicator_config['warning_threshold']
+        critical_threshold = self.indicator_config.get('critical_threshold', 0.2)
+        warning_threshold = self.indicator_config.get('warning_threshold', 0.25)
         
         # Determine color based on thresholds
-        if self.title.lower() == "ear":
+        if self.label_text.lower() == "ear":
             # For EAR, lower values are critical
             if value <= critical_threshold:
                 color = "#ff3b30"  # Apple red
@@ -177,7 +159,7 @@ class IndicatorWidget(QWidget):
             else:
                 color = "#34c759"  # Apple green
                 self.value_label.setStyleSheet("color: #34c759; font-weight: bold;")
-        elif self.title.lower() == "mar":
+        elif self.label_text.lower() == "mar":
             # For MAR, higher values are critical
             if value >= critical_threshold:
                 color = "#ff3b30"  # Apple red
@@ -188,7 +170,7 @@ class IndicatorWidget(QWidget):
             else:
                 color = "#34c759"  # Apple green
                 self.value_label.setStyleSheet("color: #34c759; font-weight: bold;")
-        elif self.title.lower() == "perclos":
+        elif self.label_text.lower() == "perclos":
             # For PERCLOS, higher values are critical
             if value >= critical_threshold:
                 color = "#ff3b30"  # Apple red
