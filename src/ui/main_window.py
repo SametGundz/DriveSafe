@@ -57,7 +57,6 @@ class DriverDrowsinessMainWindow(QMainWindow):
         self.show_landmarks = False
         self.show_head_pose = False
         self.show_gaze = False  # Bakış yönü gösterme durumu
-        self.use_detailed_model = False  # Detaylı model kullanma durumu
         
         # Camera settings
         self.camera_id = 0
@@ -385,18 +384,6 @@ class DriverDrowsinessMainWindow(QMainWindow):
         self.show_head_pose_button.clicked.connect(self._toggle_head_pose)
         control_layout.addWidget(self.show_head_pose_button)
         
-        # Toggle detailed model button
-        self.use_detailed_model_button = QPushButton("Detaylı Model Kullan")
-        self.use_detailed_model_button.setFixedSize(
-            self.config['controls']['button_width'] + 80,
-            self.config['controls']['button_height']
-        )
-        self.use_detailed_model_button.setCheckable(True)
-        self.use_detailed_model_button.setChecked(False)
-        self.use_detailed_model_button.clicked.connect(self._toggle_detailed_model)
-        self.use_detailed_model_button.setEnabled(False)  # Başlangıçta devre dışı
-        control_layout.addWidget(self.use_detailed_model_button)
-        
         # Toggle gaze button
         self.gaze_button = QPushButton("Bakış Yönünü Göster")
         self.gaze_button.setCheckable(True)
@@ -647,27 +634,9 @@ class DriverDrowsinessMainWindow(QMainWindow):
         if self.show_head_pose:
             self.show_head_pose_button.setStyleSheet("background-color: #2196F3; color: white;")
             self.update_status("Baş duruşu gösteriliyor")
-            # Detaylı model butonunu etkinleştir
-            self.use_detailed_model_button.setEnabled(True)
         else:
             self.show_head_pose_button.setStyleSheet("")
             self.update_status("Baş duruşu gizlendi")
-            # Detaylı model butonunu devre dışı bırak
-            self.use_detailed_model_button.setEnabled(False)
-            self.use_detailed_model_button.setChecked(False)
-            self.use_detailed_model = False
-    
-    def _toggle_detailed_model(self):
-        """Toggle the use of detailed 3D model for head pose."""
-        self.use_detailed_model = self.use_detailed_model_button.isChecked()
-        
-        # Update button appearance
-        if self.use_detailed_model:
-            self.use_detailed_model_button.setStyleSheet("background-color: #9C27B0; color: white;")
-            self.update_status("Detaylı 3D model kullanılıyor")
-        else:
-            self.use_detailed_model_button.setStyleSheet("")
-            self.update_status("Basit 3D model kullanılıyor")
     
     def _toggle_gaze(self):
         """Toggle the display of gaze direction."""
@@ -731,6 +700,10 @@ class DriverDrowsinessMainWindow(QMainWindow):
             
             # Reset PERCLOS calculation
             self.eye_closure_history = []
+            # Başlangıçta göz açık kabul edilerek history'yi doldur
+            # Böylece ilk PERCLOS değerleri düşük (0) olarak başlar
+            for _ in range(min(20, self.max_history_frames)):
+                self.eye_closure_history.append(0)  # Göz açık (0) olarak ekle
             
             self.update_status("Algılama başlatıldı.")
             print("INFO: Camera capture started successfully")
@@ -832,7 +805,14 @@ class DriverDrowsinessMainWindow(QMainWindow):
             
             # Calculate PERCLOS as percentage of closed eyes in the window
             if self.eye_closure_history:
-                perclos = (sum(self.eye_closure_history) / len(self.eye_closure_history)) * 100.0
+                # Minimum veri miktarı kontrolü - az veri ile yanlış yüksek değerlerden kaçınmak için
+                min_history_frames = min(10, self.max_history_frames // 10)  # En az 10 kare veya max karenin 1/10'u
+                if len(self.eye_closure_history) < min_history_frames:
+                    # Yeterli veri yoksa düşük bir değer kullan
+                    perclos = 0.0
+                else:
+                    # Yeterli veri toplanmışsa normal hesaplamayı yap
+                    perclos = (sum(self.eye_closure_history) / len(self.eye_closure_history)) * 100.0
             
             # Draw landmarks if enabled
             if self.show_landmarks:
@@ -880,13 +860,20 @@ class DriverDrowsinessMainWindow(QMainWindow):
                 frame = self.mediapipe_utils.visualize_head_pose(
                     frame, 
                     landmarks,
-                    visualization_type='cube',  # Her zaman küp görünümünü kullan
-                    use_detailed_model=self.use_detailed_model  # Detaylı model kullanımı
+                    visualization_type='cube'  # Her zaman küp görünümünü kullan
                 )
             
             # Visualize gaze direction if enabled
             if self.show_gaze:
-                frame, normalized_face = self.mediapipe_utils.visualize_gaze(frame, landmarks)
+                # EAR değerini ve eşik değerini visualize_gaze'e ilet
+                # Böylece göz kapalıyken bakış vektörü çizilmeyecek
+                ear_threshold = self.config.get('detection', {}).get('ear_threshold', 0.21)
+                frame, normalized_face = self.mediapipe_utils.visualize_gaze(
+                    frame, 
+                    landmarks,
+                    ear_value=ear,  # Ortalama EAR değerini ilet
+                    ear_threshold=ear_threshold  # Eşik değerini ilet
+                )
                 
                 # Eğer normalize edilmiş yüz görüntüsü varsa, küçük bir pencerede göster
                 if normalized_face is not None:
