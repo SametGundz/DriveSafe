@@ -13,12 +13,13 @@ import os
 from pathlib import Path
 import cv2
 import numpy as np
+import logging
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QDockWidget, QListWidget, QMenuBar, QToolBar,
     QStatusBar, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QGridLayout, QFormLayout, QDialog, QDoubleSpinBox, QComboBox,
-    QDialogButtonBox, QMessageBox, QFrame
+    QDialogButtonBox, QMessageBox, QFrame, QSpacerItem, QSizePolicy
 )
 from PyQt6.QtCore import Qt, QSize, QTimer, pyqtSlot, QMargins
 from PyQt6.QtGui import QPixmap, QImage, QAction, QIcon, QFont, QPainter, QColor, QPen
@@ -46,46 +47,48 @@ class DriverDrowsinessMainWindow(QMainWindow):
         """Initialize the main window."""
         super().__init__()
         
+        # Set window title and icon
+        self.setWindowTitle("Sürücü Uykululuk Tespit Sistemi")
+        
+        # Initialize variables
+        self.cap = None
+        self.mediapipe_utils = None
+        self.is_capturing = False
+        self.show_landmarks = False
+        self.show_head_pose = False
+        self.show_gaze = False  # Bakış yönü gösterme durumu
+        self.use_detailed_model = False  # Detaylı model kullanma durumu
+        
+        # Camera settings
+        self.camera_id = 0
+        self.camera_width = 640
+        self.camera_height = 480
+        self.camera_fps = 30
+        
         # Load configuration
         self.config = load_ui_config()
         
-        # Initialize video capture variables
-        self.cap = None
-        self.camera_id = self.config.get('camera', {}).get('device', 0)
-        self.is_capturing = False
-        
-        # Initialize MediaPipe
-        self.mediapipe_utils = None
-        
-        # Flag to control landmark and gaze visibility
-        self.show_landmarks = False
-        
-        # Flag to control head pose visibility
-        self.show_head_pose = False
-        
-        # Create camera timer for video updates
-        self.camera_timer = QTimer(self)
-        self.camera_timer.timeout.connect(self._update_camera_frame)
-        self.camera_timer.setInterval(33)  # ~30 fps
-        
-        # Sample data for demonstration
-        self.demo_data = {
-            'ear': 0.25,
-            'mar': 0.5,
-            'perclos': 5.0
-        }
-        
-        # Initialize time counter for demo data
-        self.time_counter = 0.0
-        self.update_interval_sec = 0.1  # 100ms in seconds
-        
-        # Initialize PERCLOS calculation variables
-        self.eye_closure_history = []
-        self.max_history_frames = int(self.config.get('detection', {})
-                                    .get('perclos', {}).get('window_size', 150))
-        
         # Initialize UI
         self._init_ui()
+        
+        # Initialize timers
+        self.camera_timer = QTimer()
+        self.camera_timer.timeout.connect(self._update_camera_frame)
+        self.update_interval_ms = 33  # ~30 FPS
+        
+        # Initialize chart timer - yüksek sıklıkta örnekleme (bilimsel analiz için)
+        self.chart_timer = QTimer()
+        self.chart_timer.timeout.connect(self._update_chart_data)
+        self.update_interval_sec = 0.05  # 50ms update for chart - yüksek çözünürlüklü örnekleme
+        self.time_counter = 0.0  # Time counter for chart (seconds)
+        
+        # Initialize drowsiness metrics
+        self.eye_closure_history = []
+        self.max_history_frames = int(self.config.get('detection', {}).get('perclos_window_sec', 60) * self.camera_fps)
+        
+        # Set up logging
+        self.logger = logging.getLogger(__name__)
+        self.logger.info("Main window initialized")
     
     def _init_ui(self):
         """
@@ -320,6 +323,15 @@ class DriverDrowsinessMainWindow(QMainWindow):
         main_layout.addLayout(top_layout)
         
         # Control area
+        control_layout = self._create_controls()
+        main_layout.addLayout(control_layout)
+        
+        # Time series chart
+        self._create_chart()
+        main_layout.addWidget(self.chart_view)
+    
+    def _create_controls(self):
+        """Create control buttons for the application."""
         control_layout = QHBoxLayout()
         control_layout.setContentsMargins(0, 20, 0, 20)
         
@@ -373,20 +385,35 @@ class DriverDrowsinessMainWindow(QMainWindow):
         self.show_head_pose_button.clicked.connect(self._toggle_head_pose)
         control_layout.addWidget(self.show_head_pose_button)
         
+        # Toggle detailed model button
+        self.use_detailed_model_button = QPushButton("Detaylı Model Kullan")
+        self.use_detailed_model_button.setFixedSize(
+            self.config['controls']['button_width'] + 80,
+            self.config['controls']['button_height']
+        )
+        self.use_detailed_model_button.setCheckable(True)
+        self.use_detailed_model_button.setChecked(False)
+        self.use_detailed_model_button.clicked.connect(self._toggle_detailed_model)
+        self.use_detailed_model_button.setEnabled(False)  # Başlangıçta devre dışı
+        control_layout.addWidget(self.use_detailed_model_button)
+        
+        # Toggle gaze button
+        self.gaze_button = QPushButton("Bakış Yönünü Göster")
+        self.gaze_button.setCheckable(True)
+        self.gaze_button.setChecked(False)
+        self.gaze_button.clicked.connect(self._toggle_gaze)
+        control_layout.addWidget(self.gaze_button)
+        
         control_layout.addStretch()
         
-        main_layout.addLayout(control_layout)
-        
-        # Time series chart
-        self._create_chart()
-        main_layout.addWidget(self.chart_view)
+        return control_layout
     
     def _create_chart(self):
         """Create the time series chart for EAR, MAR, and PERCLOS data."""
         # Create chart
         chart = QChart()
         chart.setTitle("Metrikler Zaman Grafiği")
-        chart.setAnimationOptions(QChart.AnimationOption.SeriesAnimations)
+        chart.setAnimationOptions(QChart.AnimationOption.NoAnimation)  # Animasyonları kapat
         chart.setBackgroundVisible(False)
         chart.setBackgroundRoundness(0)
         chart.setMargins(QMargins(0, 0, 0, 0))
@@ -398,18 +425,21 @@ class DriverDrowsinessMainWindow(QMainWindow):
         ))
         chart.setTitleBrush(QColor("#333333"))
         
-        # Create series for EAR, MAR, and PERCLOS
+        # Create series for EAR, MAR, and PERCLOS - bilimsel görünüm için optimize et
         self.ear_series = QLineSeries()
         self.ear_series.setName("EAR")
-        self.ear_series.setPen(QPen(QColor("#007aff"), self.config['chart']['line_width']))
+        self.ear_series.setPen(QPen(QColor("#007aff"), self.config['chart']['line_width'], Qt.PenStyle.SolidLine))
+        self.ear_series.setUseOpenGL(True)  # OpenGL hızlandırma kullan
         
         self.mar_series = QLineSeries()
         self.mar_series.setName("MAR")
-        self.mar_series.setPen(QPen(QColor("#5ac8fa"), self.config['chart']['line_width']))
+        self.mar_series.setPen(QPen(QColor("#5ac8fa"), self.config['chart']['line_width'], Qt.PenStyle.SolidLine))
+        self.mar_series.setUseOpenGL(True)  # OpenGL hızlandırma kullan
         
         self.perclos_series = QLineSeries()
         self.perclos_series.setName("PERCLOS")
-        self.perclos_series.setPen(QPen(QColor("#ff9500"), self.config['chart']['line_width']))
+        self.perclos_series.setPen(QPen(QColor("#ff9500"), self.config['chart']['line_width'], Qt.PenStyle.SolidLine))
+        self.perclos_series.setUseOpenGL(True)  # OpenGL hızlandırma kullan
         
         # Add series to chart
         chart.addSeries(self.ear_series)
@@ -515,7 +545,11 @@ class DriverDrowsinessMainWindow(QMainWindow):
         
         # Create chart view
         self.chart_view = QChartView(chart)
-        self.chart_view.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self.chart_view.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        self.chart_view.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+        self.chart_view.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        self.chart_view.setViewportUpdateMode(QChartView.ViewportUpdateMode.FullViewportUpdate)
+        self.chart_view.setRubberBand(QChartView.RubberBand.RectangleRubberBand)  # Yakınlaştırma için alan seçimini etkinleştir
         self.chart_view.setStyleSheet("""
             background-color: white;
             border: 1px solid #e1e1e1;
@@ -606,23 +640,46 @@ class DriverDrowsinessMainWindow(QMainWindow):
             self.show_landmarks_button.setStyleSheet("")  # Reset to default style
     
     def _toggle_head_pose(self):
-        """Toggle visibility of head pose visualization."""
+        """Toggle the display of head pose."""
         self.show_head_pose = self.show_head_pose_button.isChecked()
-        status = "gösteriliyor" if self.show_head_pose else "gizleniyor"
-        self.update_status(f"Baş duruşu {status}")
         
-        # Update button style to show toggle state more clearly
+        # Update button appearance
         if self.show_head_pose:
-            self.show_head_pose_button.setStyleSheet("""
-                background-color: #9c27b0;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-weight: bold;
-            """)
+            self.show_head_pose_button.setStyleSheet("background-color: #2196F3; color: white;")
+            self.update_status("Baş duruşu gösteriliyor")
+            # Detaylı model butonunu etkinleştir
+            self.use_detailed_model_button.setEnabled(True)
         else:
-            self.show_head_pose_button.setStyleSheet("")  # Reset to default style
+            self.show_head_pose_button.setStyleSheet("")
+            self.update_status("Baş duruşu gizlendi")
+            # Detaylı model butonunu devre dışı bırak
+            self.use_detailed_model_button.setEnabled(False)
+            self.use_detailed_model_button.setChecked(False)
+            self.use_detailed_model = False
+    
+    def _toggle_detailed_model(self):
+        """Toggle the use of detailed 3D model for head pose."""
+        self.use_detailed_model = self.use_detailed_model_button.isChecked()
+        
+        # Update button appearance
+        if self.use_detailed_model:
+            self.use_detailed_model_button.setStyleSheet("background-color: #9C27B0; color: white;")
+            self.update_status("Detaylı 3D model kullanılıyor")
+        else:
+            self.use_detailed_model_button.setStyleSheet("")
+            self.update_status("Basit 3D model kullanılıyor")
+    
+    def _toggle_gaze(self):
+        """Toggle the display of gaze direction."""
+        self.show_gaze = self.gaze_button.isChecked()
+        
+        # Update button appearance
+        if self.show_gaze:
+            self.gaze_button.setStyleSheet("background-color: #9C27B0; color: white;")
+            self.update_status("Bakış yönü gösteriliyor")
+        else:
+            self.gaze_button.setStyleSheet("")
+            self.update_status("Bakış yönü gizlendi")
     
     def on_start(self):
         """Handle start button click."""
@@ -666,14 +723,11 @@ class DriverDrowsinessMainWindow(QMainWindow):
                 
             # Start the camera timer
             self.is_capturing = True
-            self.camera_timer.start()
+            self.camera_timer.start(self.update_interval_ms)
             
             # Start chart update timer (demo)
             self.time_counter = 0.0
-            self.chart_timer = QTimer(self)
-            self.chart_timer.timeout.connect(self._update_chart_data)
-            self.chart_timer.setInterval(100)  # 100ms
-            self.chart_timer.start()
+            self.chart_timer.start(int(self.update_interval_sec * 1000))  # Milisaniyeye çevir
             
             # Reset PERCLOS calculation
             self.eye_closure_history = []
@@ -823,8 +877,26 @@ class DriverDrowsinessMainWindow(QMainWindow):
             
             # Visualize head pose if enabled
             if self.show_head_pose:
-                frame = self.mediapipe_utils.visualize_head_pose(frame, landmarks)
-        
+                frame = self.mediapipe_utils.visualize_head_pose(
+                    frame, 
+                    landmarks,
+                    visualization_type='cube',  # Her zaman küp görünümünü kullan
+                    use_detailed_model=self.use_detailed_model  # Detaylı model kullanımı
+                )
+            
+            # Visualize gaze direction if enabled
+            if self.show_gaze:
+                frame, normalized_face = self.mediapipe_utils.visualize_gaze(frame, landmarks)
+                
+                # Eğer normalize edilmiş yüz görüntüsü varsa, küçük bir pencerede göster
+                if normalized_face is not None:
+                    # Normalize edilmiş yüz görüntüsünü yeniden boyutlandır
+                    norm_face_display = cv2.resize(normalized_face, (112, 112))
+                    
+                    # Görüntüyü ana kareye yerleştir (sağ üst köşe)
+                    h, w = norm_face_display.shape[:2]
+                    frame[10:10+h, frame.shape[1]-w-10:frame.shape[1]-10] = norm_face_display
+            
             # Update drowsiness detection
             from src.detection.drowsiness_detector import DrowsinessDetector
             drowsiness_detector = getattr(self, 'drowsiness_detector', None)
@@ -860,9 +932,6 @@ class DriverDrowsinessMainWindow(QMainWindow):
         # Increment time counter
         self.time_counter += self.update_interval_sec
         
-        # Get metrics from latest frame processing, should already have real values
-        # Just add the current values to the chart
-        
         # Add data points to series
         self.ear_series.append(self.time_counter, self.ear_indicator.last_value)
         self.mar_series.append(self.time_counter, self.mar_indicator.last_value)
@@ -871,11 +940,63 @@ class DriverDrowsinessMainWindow(QMainWindow):
         # Remove old data points if we exceed the chart duration
         history_duration = self.config['chart']['history_duration']
         if self.time_counter > history_duration:
-            # Adjust the X axis to show a sliding window
-            self.time_axis.setRange(self.time_counter - history_duration, self.time_counter)
+            # Kayan pencere yaklaşımı: Tüm seriyi silip yeniden yüklemek yerine,
+            # sadece pencere dışına çıkan noktaları kaldır
+            cutoff_time = self.time_counter - history_duration
             
-            # Optional: Remove old points to save memory
-            # This would need to track the points being added
+            # Verimli bir şekilde eski noktaları kaldır
+            # Tüm seriyi temizlemek yerine, sadece zaman aralığı dışındaki noktaları kaldır
+            while self.ear_series.count() > 0 and self.ear_series.at(0).x() < cutoff_time:
+                self.ear_series.remove(0)
+                
+            while self.mar_series.count() > 0 and self.mar_series.at(0).x() < cutoff_time:
+                self.mar_series.remove(0)
+                
+            while self.perclos_series.count() > 0 and self.perclos_series.at(0).x() < cutoff_time:
+                self.perclos_series.remove(0)
+                
+            # X ekseni aralığını yumuşak bir şekilde güncelle
+            # Mevcut aralığı al
+            current_min = self.time_axis.min()
+            current_max = self.time_axis.max()
+            
+            # Hedef aralık
+            target_min = self.time_counter - history_duration
+            target_max = self.time_counter
+            
+            # Aralığı daha yumuşak bir şekilde kaydır - daha düşük damping faktörü
+            # Düşük damping faktörü daha yumuşak hareket sağlar
+            damping_factor = 0.03  # Çok düşük bir değer, daha yumuşak geçiş
+            new_min = current_min + (target_min - current_min) * damping_factor
+            new_max = current_max + (target_max - current_max) * damping_factor
+            
+            # Zaman eksenini güncelle
+            self.time_axis.setRange(new_min, new_max)
+            
+            # Performans optimizasyonu: 
+            # Çok yüksek sıklıkta örnekleme yaptığımız için, performans optimizasyonu yapabiliriz
+            # Eğer çok fazla nokta birikirse, seyreltme işlemi uygulayabiliriz
+            # Bu kod, serinin fazla büyümesini engeller ama bilimsel çalışma için veri kaybı oluşmaz
+            max_points_per_series = 1000  # Makul bir limit
+            if self.ear_series.count() > max_points_per_series:
+                # Seyreltme işlemi - her iki noktadan birini tut
+                # NOT: Noktaları silerken, ilk nokta sürekli silinir, endeks kayar!
+                i = 1  # Her zaman 1. indeksten başla (0. değil, her bir noktayı koru)
+                while i < self.ear_series.count():
+                    self.ear_series.remove(i)
+                    i += 1  # İndeksler kaydığı için i'yi 2 değil 1 artır
+                    
+            if self.mar_series.count() > max_points_per_series:
+                i = 1
+                while i < self.mar_series.count():
+                    self.mar_series.remove(i)
+                    i += 1
+                    
+            if self.perclos_series.count() > max_points_per_series:
+                i = 1
+                while i < self.perclos_series.count():
+                    self.perclos_series.remove(i)
+                    i += 1
     
     def on_settings(self):
         """Show settings dialog."""
