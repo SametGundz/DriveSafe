@@ -10,14 +10,7 @@ from src.utils.face_landmark_detector import FaceLandmarkDetector, get_face_land
 from src.utils.facial_metrics import get_eye_aspect_ratio, get_mouth_aspect_ratio
 from src.utils.head_pose_estimator import HeadPoseEstimator
 from src.utils.gaze_detector import GazeDetector
-from src.utils.mediapipe_helper import MediaPipeHelper, get_mediapipe_helper
-
-# For backward compatibility, import from the legacy module
-from src.utils.mediapipe_utils import (
-    MediaPipeUtils, 
-    get_mediapipe_face_mesh,
-    load_ui_config
-)
+from src.utils.mediapipe_helper import MediaPipeHelper, get_mediapipe_helper, load_ui_config
 
 # Make key functions and classes available at package level
 __all__ = [
@@ -30,9 +23,5 @@ __all__ = [
     'GazeDetector',
     'MediaPipeHelper',
     'get_mediapipe_helper',
-    
-    # Legacy components (for backward compatibility)
-    'MediaPipeUtils',
-    'get_mediapipe_face_mesh',
     'load_ui_config'
 ] 
