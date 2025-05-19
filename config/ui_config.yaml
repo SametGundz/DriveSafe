@@ -2,19 +2,21 @@
 
 window:
   title: 'Sürücü Uykululuk Tespiti'
-  width: 1200
-  height: 800
-  min_width: 800
-  min_height: 600
+  width: 1400
+  height: 900
+  min_width: 1000
+  min_height: 700
+  start_maximized: true  # Uygulama tam ekran başlatılsın mı?
 
 video_frame:
-  width: 640
-  height: 480
+  width: 800
+  height: 600
 
 layout:
   margin: 10
   padding: 5
   spacing: 10
+  dock_width: 400  # Metrikler için genişlik (video panel de aynı genişliği kullanacak)
 
 fonts:
   family: 'Arial'
@@ -26,12 +28,21 @@ controls:
   button_width: 120
   button_height: 40
 
+# Panel başlıkları için görünüm ayarları
+panel_headers:
+  background_color: "#f0f0f0"
+  text_color: "#333333"
+  font_size: 14
+  font_weight: "bold"
+  border_color: "#e1e1e1"
+  padding: 5
+
 indicators:
-  label_width: 80
-  progress_bar_height: 15
+  label_width: 120
+  progress_bar_height: 20
   ear:
     min: 0.0
-    max: 0.4
+    max: 1.0
     warning_threshold: 0.25
     critical_threshold: 0.21
     normal_color: "#34c759"  # Apple green
@@ -51,7 +62,7 @@ indicators:
 chart:
   history_duration: 30
   line_width: 2
-  y_range_ear: [0.0, 0.4]
+  y_range_ear: [0.0, 1.0]
   y_range_mar: [0.0, 1.0]
   y_range_perclos: [0.0, 100.0]
 
