@@ -114,6 +114,10 @@ class ONNXGazeModel:
         self.input_cache = {}
         self.cache_size = 10
         
+        # Track resources loaded and model path for logging
+        self.model_path = model_path
+        self.resources_loaded = True
+        
         logger.info(f"ONNX model loaded in {time.time() - start_time:.2f}s from {model_path}")
         logger.info(f"Input shape: {self.input_shape}, Input name: {self.input_name}, Output name: {self.output_name}")
     
@@ -127,6 +131,11 @@ class ONNXGazeModel:
         Returns:
             torch.Tensor: Output tensor (gaze prediction)
         """
+        # Check if resources are still loaded
+        if not hasattr(self, 'resources_loaded') or not self.resources_loaded:
+            logger.warning("Attempted to use ONNX model after resources were released")
+            return torch.zeros((x.shape[0] if len(x.shape) > 3 else 1, 2), dtype=torch.float32)
+        
         # Optimize for single frame input
         if len(x.shape) == 3:  # Single image, add batch dimension
             x = x.unsqueeze(0) if isinstance(x, torch.Tensor) else np.expand_dims(x, 0)
@@ -157,6 +166,45 @@ class ONNXGazeModel:
             logger.error(f"Inference error: {str(e)}")
             # Return empty tensor on error
             return torch.zeros((x_numpy.shape[0], 2), dtype=torch.float32)
+    
+    def release_resources(self):
+        """
+        Explicitly release ONNX session and other heavy resources.
+        This method should be called when the model is no longer needed
+        to free up memory immediately.
+        """
+        if hasattr(self, 'resources_loaded') and self.resources_loaded:
+            try:
+                # Release session
+                if hasattr(self, 'session') and self.session is not None:
+                    # Clear all references
+                    self.io_binding = None
+                    self.session = None
+                
+                # Clear cache
+                if hasattr(self, 'input_cache'):
+                    self.input_cache.clear()
+                
+                # Mark resources as released
+                self.resources_loaded = False
+                
+                # Force garbage collection for immediate memory release
+                import gc
+                gc.collect()
+                
+                logger.info(f"ONNX model resources released for {self.model_path}")
+            except Exception as e:
+                logger.error(f"Error releasing ONNX resources: {str(e)}")
+    
+    def __del__(self):
+        """
+        Clean up resources when the object is destroyed.
+        """
+        try:
+            self.release_resources()
+        except Exception as e:
+            # Suppress errors during garbage collection
+            pass
     
     def run_optimized(self, x: Union[torch.Tensor, np.ndarray]) -> torch.Tensor:
         """
@@ -199,20 +247,23 @@ class ModelLoader:
         """
         start_time = time.time()
         
+        # Store instance-specific state
+        self.config_path = config_path
+        self.initialized = False
+        self.loaded_models = []  # Track loaded models for proper cleanup
+        
         # Base directory for all models
         self.base_model_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'models')
         
         # Ensure models directory exists
         os.makedirs(self.base_model_dir, exist_ok=True)
         
-        # Set config path
+        # Set config path if not provided
         if config_path is None:
             self.config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 
-                                           'config', 'config.yaml')
-        else:
-            self.config_path = config_path
+                                        'config', 'config.yaml')
         
-        # Load configuration
+        # Load configuration if available
         self.config = self._load_config()
         
         # Extract model-specific configurations
@@ -221,8 +272,32 @@ class ModelLoader:
         # Model search paths in order of preference
         self.model_search_paths = self._setup_model_search_paths()
         
-        logger.info(f"ModelLoader initialized in {time.time() - start_time:.2f}s")
-    
+        self.initialized = True
+        logger.debug(f"ModelLoader initialized in {time.time() - start_time:.2f}s")
+
+    def __del__(self):
+        """Clean up resources when the ModelLoader is destroyed."""
+        try:
+            # Clean up all loaded models
+            for model in self.loaded_models:
+                if hasattr(model, 'release_resources'):
+                    try:
+                        model.release_resources()
+                    except Exception as e:
+                        logger.error(f"Error releasing model resources: {str(e)}")
+            
+            # Clear the model cache
+            self.clear_model_cache()
+            
+            # Force garbage collection
+            import gc
+            gc.collect()
+            
+            logger.debug("ModelLoader resources cleaned up")
+        except Exception as e:
+            # Suppress errors during garbage collection
+            pass
+
     def _setup_model_search_paths(self) -> List[str]:
         """
         Set up a list of paths to search for models in order of preference.
@@ -326,6 +401,10 @@ class ModelLoader:
                     logger.info(f"Loading ETH-XGaze ONNX model from {onnx_path}")
                     model = ONNXGazeModel(onnx_path, device)
                     self._model_cache[cache_key] = model
+                    
+                    # Track the loaded model for proper cleanup
+                    self.loaded_models.append(model)
+                    
                     logger.info(f"Model loaded in {time.time() - start_time:.2f}s")
                     return model
                 except ImportError as e:
@@ -340,20 +419,16 @@ class ModelLoader:
             model = self._load_pytorch_model(pytorch_path, device)
             if model:
                 self._model_cache[cache_key] = model
+                
+                # Track the loaded model for proper cleanup
+                self.loaded_models.append(model)
+                
                 logger.info(f"Model loaded in {time.time() - start_time:.2f}s")
                 return model
-        
-        # If no model found, create a new one with default weights
-        logger.warning("No pre-trained ETH-XGaze model found. Creating a model with default initialization.")
-        logger.warning("Please download the pre-trained weights for better performance.")
-        
-        model = GazeResNet(pretrained=True)
-        model = model.to(device)
-        model.eval()
-        
-        self._model_cache[cache_key] = model
-        logger.info(f"Default model created in {time.time() - start_time:.2f}s")
-        return model
+            
+        # No model found
+        logger.error(f"Could not find ETH-XGaze model in any of the search paths.")
+        return None
     
     def _load_pytorch_model(self, model_path: str, device: str) -> Optional[torch.nn.Module]:
         """
@@ -468,10 +543,6 @@ class ModelLoader:
         """Clear the model cache to free memory."""
         ModelLoader._model_cache.clear()
         
-    def __del__(self):
-        """Cleanup when the object is destroyed."""
-        # Nothing specific needed here as Python will handle the cleanup
-
 def get_model_loader(config_path: Optional[str] = None) -> ModelLoader:
     """
     Factory function to get a ModelLoader instance.
