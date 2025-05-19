@@ -16,7 +16,7 @@ import os
 import cv2
 import yaml
 import logging
-from typing import List, Tuple, Optional, Dict, Any
+from typing import List, Tuple, Optional, Dict, Any, Union, Sequence
 
 import numpy as np
 
@@ -72,7 +72,7 @@ class MediaPipeHelper(FaceLandmarkDetector):
         
         logger.info("MediaPipeHelper initialized with all components")
     
-    def get_eye_aspect_ratio(self, eye_landmarks):
+    def get_eye_aspect_ratio(self, eye_landmarks: List[List[float]]) -> float:
         """
         Calculate the eye aspect ratio.
         
@@ -84,7 +84,7 @@ class MediaPipeHelper(FaceLandmarkDetector):
         """
         return get_eye_aspect_ratio(eye_landmarks)
     
-    def get_mouth_aspect_ratio(self, landmarks):
+    def get_mouth_aspect_ratio(self, landmarks: List[List[float]]) -> float:
         """
         Calculate the mouth aspect ratio.
         
@@ -97,7 +97,7 @@ class MediaPipeHelper(FaceLandmarkDetector):
         mouth_landmarks = self.get_mouth_landmarks(landmarks)
         return get_mouth_aspect_ratio(mouth_landmarks)
     
-    def calculate_head_pose(self, landmarks, frame):
+    def calculate_head_pose(self, landmarks: List[List[float]], frame: np.ndarray) -> Tuple[np.ndarray, Tuple[float, float, float]]:
         """
         Calculate head pose from facial landmarks.
         
@@ -110,7 +110,7 @@ class MediaPipeHelper(FaceLandmarkDetector):
         """
         return self.head_pose_estimator.calculate_head_pose(landmarks, frame)
     
-    def get_head_pose(self, landmarks, frame):
+    def get_head_pose(self, landmarks: List[List[float]], frame: np.ndarray) -> Tuple[float, float, float]:
         """
         Get head pose angles.
         
@@ -124,8 +124,9 @@ class MediaPipeHelper(FaceLandmarkDetector):
         _, angles = self.head_pose_estimator.calculate_head_pose(landmarks, frame)
         return angles
     
-    def visualize_head_pose(self, frame, landmarks, show_axes=True, show_angles=True,
-                           visualization_type='axes'):
+    def visualize_head_pose(self, frame: np.ndarray, landmarks: List[List[float]], 
+                           show_axes: bool = True, show_angles: bool = True,
+                           visualization_type: str = 'axes') -> np.ndarray:
         """
         Visualize head pose on the frame.
         
@@ -143,7 +144,7 @@ class MediaPipeHelper(FaceLandmarkDetector):
             frame, landmarks, show_axes, show_angles, visualization_type
         )
     
-    def get_eye_gaze_direction(self, landmarks):
+    def get_eye_gaze_direction(self, landmarks: List[List[float]]) -> np.ndarray:
         """
         Get eye gaze direction.
         
@@ -155,7 +156,7 @@ class MediaPipeHelper(FaceLandmarkDetector):
         """
         return self.gaze_detector.get_eye_gaze_direction(landmarks)
     
-    def predict_gaze(self, frame, landmarks):
+    def predict_gaze(self, frame: np.ndarray, landmarks: List[List[float]]) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         """
         Predict gaze direction using the model.
         
@@ -168,8 +169,9 @@ class MediaPipeHelper(FaceLandmarkDetector):
         """
         return self.gaze_detector.predict_gaze(frame, landmarks)
     
-    def visualize_gaze(self, frame, landmarks, ear_value=None, ear_threshold=0.2,
-                    frame_skip=3):
+    def visualize_gaze(self, frame: np.ndarray, landmarks: List[List[float]], 
+                      ear_value: Optional[float] = None, ear_threshold: float = 0.2,
+                      frame_skip: int = 3) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         """
         Visualize gaze direction on the frame.
         
@@ -187,7 +189,7 @@ class MediaPipeHelper(FaceLandmarkDetector):
             frame, landmarks, ear_value, ear_threshold, frame_skip
         )
     
-    def release(self):
+    def release(self) -> None:
         """
         Release all resources.
         """
@@ -204,7 +206,7 @@ class MediaPipeHelper(FaceLandmarkDetector):
         logger.info("MediaPipeHelper resources released")
 
 
-def get_mediapipe_helper():
+def get_mediapipe_helper() -> MediaPipeHelper:
     """
     Get or create a MediaPipeHelper instance.
     
@@ -215,20 +217,23 @@ def get_mediapipe_helper():
     return MediaPipeHelper()
 
 
-def load_ui_config():
+def load_ui_config() -> Dict[str, Any]:
     """
-    Load UI configuration from YAML file.
+    Load UI configuration from main config file.
     
     Returns:
-        dict: UI configuration
+        Dict[str, Any]: UI configuration dictionary
     """
-    config_path = os.path.join("config", "ui_config.yaml")
+    config_path = os.path.join("config", "config.yaml")
     
     try:
         with open(config_path, 'r', encoding='utf-8') as config_file:
             config = yaml.safe_load(config_file)
+            
+        # Ana konfigürasyon dosyasından UI kısmını al
+        ui_config = config.get('ui', {})
         logger.info(f"UI configuration loaded from {config_path}")
-        return config
+        return ui_config
     except Exception as e:
-        logger.error(f"Error loading UI config: {str(e)}")
+        logger.error(f"Error loading config: {str(e)}")
         return {} 

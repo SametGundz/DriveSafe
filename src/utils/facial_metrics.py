@@ -14,7 +14,7 @@ import cv2
 import numpy as np
 import mediapipe as mp
 import yaml
-from typing import List, Optional, Tuple, Dict, Any, Union
+from typing import List, Optional, Tuple, Dict, Any, Union, Sequence
 
 # Import constants
 from src.utils.constants import (
@@ -25,7 +25,7 @@ from src.utils.constants import (
 )
 
 
-def calculate_distance(point1: List[float], point2: List[float]) -> float:
+def calculate_distance(point1: Sequence[float], point2: Sequence[float]) -> float:
     """
     Calculate the Euclidean distance between two points.
     
@@ -275,7 +275,7 @@ def get_perclos(eye_state_history: List[int], window_seconds: int = 60, fps: int
 
 def is_blinking(ear: float, threshold: float = 0.21, 
                consecutive_frames: int = 3, 
-               ear_history: Optional[List[float]] = None) -> Tuple[bool, Optional[List[float]]]:
+               ear_history: Optional[List[float]] = None) -> Tuple[bool, List[float]]:
     """
     Detect if the eye is blinking based on EAR values.
     
@@ -315,7 +315,7 @@ def is_blinking(ear: float, threshold: float = 0.21,
 
 def is_yawning(mar: float, threshold: float = 0.5, 
               consecutive_frames: int = 5,
-              mar_history: Optional[List[float]] = None) -> Tuple[bool, Optional[List[float]]]:
+              mar_history: Optional[List[float]] = None) -> Tuple[bool, List[float]]:
     """
     Detect if the person is yawning based on MAR values.
     
@@ -456,12 +456,12 @@ def detect_ear_mar(frame: np.ndarray) -> Tuple[Optional[float], Optional[float],
     return avg_ear, mar, eyes_closed, mouth_open
 
 
-def load_config() -> Dict:
+def load_config() -> Dict[str, Any]:
     """
     Load configuration from YAML file.
     
     Returns:
-        Dict: Configuration dictionary
+        Dict[str, Any]: Configuration dictionary
     """
     # Get the project root directory (3 levels up from this file)
     current_dir = os.path.dirname(os.path.abspath(__file__))
