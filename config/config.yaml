@@ -29,6 +29,7 @@ detection:
     deviation_threshold: 20.0      # Bakış sapma eşiği (derece)
     use_eth_xgaze: true            # ETH-XGaze modelini kullan
     normalize_face: true           # Yüz normalizasyonunu etkinleştir
+    frame_skip: 3                  # Kaç karede bir bakış yönü tespiti yapılacağı (performans optimizasyonu)
 
 # Uykululuk değerlendirme parametreleri
 drowsiness:
@@ -73,7 +74,7 @@ ui:
   
   chart:
     update_interval: 100           # ms cinsinden grafik güncelleme aralığı
-    y_range_ear: [0, 0.5]          # EAR değerleri için Y ekseni aralığı
+    y_range_ear: [0, 1.0]          # EAR değerleri için Y ekseni aralığı
     y_range_mar: [0, 1.0]          # MAR değerleri için Y ekseni aralığı
     y_range_perclos: [0, 100]      # PERCLOS değerleri için Y ekseni aralığı
     line_width: 2

@@ -241,6 +241,10 @@ class MediaPipeUtils:
             print(f"UYARI: ONNX model bulunamadı: {self.model_path}")
             self.onnx_session = None
             
+        # Gaze optimizasyonu için değişkenler
+        self._last_gaze_vector = None
+        self._last_normalized_image = None
+        self._frame_counter = 0
     
     def detect_face_landmarks(self, frame: np.ndarray) -> Tuple[List[List[float]], bool]:
         """
@@ -1461,7 +1465,8 @@ class MediaPipeUtils:
         return image
     
     def visualize_gaze(self, frame: np.ndarray, landmarks: List[List[float]], 
-                          ear_value: float = None, ear_threshold: float = 0.2) -> Tuple[np.ndarray, np.ndarray]:
+                        ear_value: float = None, ear_threshold: float = 0.2,
+                        frame_skip: int = 3) -> Tuple[np.ndarray, np.ndarray]:
         """
         Bakış yönünü tahmin et ve görselleştir
         
@@ -1470,6 +1475,7 @@ class MediaPipeUtils:
             landmarks: 2D yüz işaret noktaları
             ear_value: Eye Aspect Ratio değeri, eğer verilmişse göz açıklığını kontrol etmek için kullanılır
             ear_threshold: EAR eşik değeri, bu değerin altında gözler kapalı kabul edilir
+            frame_skip: Kaç karede bir tahmin yapılacağı (1: her karede, 2: her iki karede bir, vs.)
             
         Returns:
             frame: Bakış yönü çizilmiş görüntü
@@ -1482,8 +1488,19 @@ class MediaPipeUtils:
         if ear_value is not None and ear_value < ear_threshold:
             return frame, None
         
-        # Bakış yönünü tahmin et
-        gaze_vector, normalized_image = self.predict_gaze(frame, landmarks)
+        # Her frame_skip karede bir tahmin yap, arada geçen karelerde son tahmini kullan
+        self._frame_counter += 1
+        if self._frame_counter >= frame_skip:
+            # Bakış yönünü tahmin et
+            self._last_gaze_vector, self._last_normalized_image = self.predict_gaze(frame, landmarks)
+            self._frame_counter = 0
+        
+        # Eğer daha önce hiç tahmin yapılmadıysa, ilk tahmini yap
+        if self._last_gaze_vector is None or self._last_normalized_image is None:
+            self._last_gaze_vector, self._last_normalized_image = self.predict_gaze(frame, landmarks)
+        
+        gaze_vector = self._last_gaze_vector
+        normalized_image = self._last_normalized_image
         
         if gaze_vector is None:
             return frame, None
@@ -1593,7 +1610,7 @@ def load_ui_config() -> Dict:
             'indicators': {
                 'ear': {
                     'min': 0.0,
-                    'max': 0.4,
+                    'max': 1.0,
                     'warning_threshold': 0.25,
                     'critical_threshold': 0.21
                 },
@@ -1613,7 +1630,7 @@ def load_ui_config() -> Dict:
             'chart': {
                 'history_duration': 30,
                 'line_width': 2,
-                'y_range_ear': [0.0, 0.4],
+                'y_range_ear': [0.0, 1.0],
                 'y_range_mar': [0.0, 1.0],
                 'y_range_perclos': [0.0, 100.0]
             },
