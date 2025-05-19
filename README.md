@@ -183,6 +183,8 @@ Bu projede, performansı ve kod organizasyonunu iyileştirmek için MediaPipe i�
 - **Facial Metrics**: 
   - EAR (Göz Açıklık Oranı) hesaplama
   - MAR (Ağız Açıklık Oranı) hesaplama
+  - PERCLOS (göz kapalılık yüzdesi) hesaplama
+  - Göz kırpma ve esneme tespiti
   - Mesafe hesaplama işlevleri
   - Nokta tabanlı ölçüm algoritmaları
 
@@ -204,6 +206,12 @@ Bu projede, performansı ve kod organizasyonunu iyileştirmek için MediaPipe i�
   - Bileşen oluşturma ve yönetme
   - Kaynak yönetimi işlevleri
 
+- **DrowsinessDetector**:
+  - Uykululuk durumunu tespit etme
+  - PERCLOS, EAR, baş duruşu ve bakış metriklerini kullanarak analiz
+  - Uyarı seviyesi belirleme
+  - Sonuçların görselleştirilmesi
+
 ### Performans İyileştirmeleri
 
 - **Kare Atlama**: Bakış tespiti, `frame_skip` parametresi ile kontrol edilen belirli aralıklarla çalışır
@@ -211,63 +219,415 @@ Bu projede, performansı ve kod organizasyonunu iyileştirmek için MediaPipe i�
 - **Seçici İşleme**: Her karede değil, yalnızca belirli aralıklarla ağır işlemler gerçekleştirilir
 - **Önbelleğe Alma**: Tahminler arasında son tahmin edilen bakış vektörü yeniden kullanılır
 - **FPS Ölçümü**: Anlık FPS gösterimi ile performans değerlendirmesi yapılabilir
+- **Tip Belirteçleri**: Tüm modüllerde tutarlı tip belirteçleri (type hints) kullanılarak kod kalitesi artırılmıştır
 
-### Kullanım Örnekleri
+## Modüler Mimari Kullanım Örnekleri
 
-#### Yeni Modüler API Kullanımı (Önerilen)
+Projede bulunan modüler mimariyi farklı senaryolarda nasıl kullanabileceğinize dair kapsamlı örnekler aşağıda verilmiştir:
+
+### 1. Temel Modüler API Kullanımı
+
+Modüler API'yi kullanarak basit bir yüz tespiti ve metrik hesaplama işlemi gerçekleştirme:
 
 ```python
-# Birleşik arayüz kullanımı
-from src.utils import MediaPipeHelper, get_mediapipe_helper
+from src.utils import get_face_landmark_detector
+from src.utils.facial_metrics import get_eye_aspect_ratio, get_mouth_aspect_ratio
 
-# Helper örneği alın
-mp_helper = get_mediapipe_helper()
+# Görüntüyü al (OpenCV ile)
+import cv2
+cap = cv2.VideoCapture(0)
+ret, frame = cap.read()
 
-# Yüz landmarkları tespit edin
-landmarks, face_detected = mp_helper.detect_face_landmarks(frame)
+# FaceLandmarkDetector örneği oluştur
+detector = get_face_landmark_detector()
 
-# Göz ve ağız metrikleri hesaplayın
-left_eye = mp_helper.get_eye_landmarks(landmarks, left_eye=True)
-right_eye = mp_helper.get_eye_landmarks(landmarks, left_eye=False)
-left_ear = mp_helper.get_eye_aspect_ratio(left_eye)
-right_ear = mp_helper.get_eye_aspect_ratio(right_eye)
-ear = (left_ear + right_ear) / 2.0
-mar = mp_helper.get_mouth_aspect_ratio(landmarks)
+# Yüz landmarkları tespit et
+landmarks, face_detected = detector.detect_face_landmarks(frame)
 
-# Baş duruşu ve bakış yönünü görselleştirin
-frame = mp_helper.visualize_head_pose(frame, landmarks, visualization_type='cube')
-frame, normalized_face = mp_helper.visualize_gaze(
-    frame, landmarks, ear_value=ear, ear_threshold=0.21, frame_skip=3
-)
+if face_detected:
+    # Göz landmarkları al
+    left_eye = detector.get_eye_landmarks(landmarks, left_eye=True)
+    right_eye = detector.get_eye_landmarks(landmarks, left_eye=False)
+    
+    # EAR hesapla
+    left_ear = get_eye_aspect_ratio(left_eye)
+    right_ear = get_eye_aspect_ratio(right_eye)
+    avg_ear = (left_ear + right_ear) / 2.0
+    
+    # MAR hesapla
+    mouth = detector.get_mouth_landmarks(landmarks)
+    mar = get_mouth_aspect_ratio(mouth)
+    
+    print(f"EAR: {avg_ear:.3f}, MAR: {mar:.3f}")
+    
+    # Landmarkları görselleştir
+    viz_frame = detector.draw_facial_landmarks(
+        frame.copy(), 
+        left_eye + right_eye,  # Tüm göz landmarkları
+        landmark_color=(0, 255, 0),
+        landmark_radius=2
+    )
+    
+    cv2.imshow("Facial Landmarks", viz_frame)
+    cv2.waitKey(0)
+
+# Kaynakları serbest bırak
+detector.release()
+cap.release()
+cv2.destroyAllWindows()
 ```
 
-#### Ayrı Modülleri Kullanma
+### 2. MediaPipeHelper Tümleşik Arayüzünü Kullanma
+
+Tüm bileşenleri tek bir arayüz üzerinden kullanarak uykululuk tespiti yapma:
 
 ```python
-# Bireysel bileşenleri doğrudan kullanma
-from src.utils.face_landmark_detector import FaceLandmarkDetector
-from src.utils.facial_metrics import get_eye_aspect_ratio, get_mouth_aspect_ratio
+from src.utils import get_mediapipe_helper
+from src.detection.drowsiness_detector import DrowsinessDetector
+import cv2
+import time
+
+# MediaPipeHelper örneği oluştur
+mp_helper = get_mediapipe_helper()
+
+# Drowsiness detector oluştur
+drowsiness_detector = DrowsinessDetector()
+
+# Kamerayı başlat
+cap = cv2.VideoCapture(0)
+
+# Ana döngü
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        break
+    
+    # İşleme zamanını ölç
+    start_time = time.time()
+    
+    # Yüz landmarkları tespit et
+    landmarks, face_detected = mp_helper.detect_face_landmarks(frame)
+    
+    if face_detected:
+        # Göz ve ağız metrikleri hesapla
+        left_eye = mp_helper.get_eye_landmarks(landmarks, left_eye=True)
+        right_eye = mp_helper.get_eye_landmarks(landmarks, left_eye=False)
+        left_ear = mp_helper.get_eye_aspect_ratio(left_eye)
+        right_ear = mp_helper.get_eye_aspect_ratio(right_eye)
+        avg_ear = (left_ear + right_ear) / 2.0
+        mar = mp_helper.get_mouth_aspect_ratio(landmarks)
+        
+        # Baş duruşu hesapla
+        roll, pitch, yaw = mp_helper.get_head_pose(landmarks, frame)
+        
+        # Tüm bilgileri drowsiness detector'a aktar
+        drowsiness_result = drowsiness_detector.update(
+            ear_value=avg_ear,
+            head_pose=(roll, pitch, yaw),
+            gaze_direction=None  # Opsiyonel
+        )
+        
+        # Sonuçları görselleştir
+        frame = drowsiness_detector.visualize(
+            frame, ear_left=left_ear, ear_right=right_ear, show_metrics=True
+        )
+        
+        # Baş duruşu ve bakış yönünü görselleştir
+        if drowsiness_result['drowsiness_level'] > 0.3:  # Uykululuk seviyesi belli bir eşiği geçtiyse
+            frame = mp_helper.visualize_head_pose(frame, landmarks, visualization_type='cube')
+            frame, _ = mp_helper.visualize_gaze(
+                frame, landmarks, ear_value=avg_ear, ear_threshold=0.21, frame_skip=2
+            )
+    
+    # FPS hesapla
+    fps = 1.0 / (time.time() - start_time)
+    cv2.putText(frame, f"FPS: {fps:.1f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+    
+    # Görüntüyü göster
+    cv2.imshow("Drowsiness Detection", frame)
+    
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+# Kaynakları serbest bırak
+cap.release()
+mp_helper.release()
+cv2.destroyAllWindows()
+```
+
+### 3. Sadece Baş Duruşu Tahmini
+
+Yalnızca baş duruşu tahmini yaparak sürücünün baş hareketlerini izleme:
+
+```python
+from src.utils.face_landmark_detector import get_face_landmark_detector
 from src.utils.head_pose_estimator import HeadPoseEstimator
-from src.utils.gaze_detector import GazeDetector
+import cv2
+import numpy as np
 
-# Bileşenleri ayrı ayrı oluşturma
-face_detector = FaceLandmarkDetector()
+# Bileşenleri oluştur
+face_detector = get_face_landmark_detector()
 head_pose_estimator = HeadPoseEstimator()
-gaze_detector = GazeDetector()
 
-# Yüz landmarkları tespit etme
-landmarks, face_detected = face_detector.detect_face_landmarks(frame)
+# Kamerayı başlat
+cap = cv2.VideoCapture(0)
 
-# Göz landmarkları ve metrikleri
-left_eye = face_detector.get_eye_landmarks(landmarks, left_eye=True)
-right_eye = face_detector.get_eye_landmarks(landmarks, left_eye=False)
-left_ear = get_eye_aspect_ratio(left_eye)
-right_ear = get_eye_aspect_ratio(right_eye)
+# Baş açıları için geçmiş verileri sakla (yumuşatma için)
+pitch_history = []
+yaw_history = []
+roll_history = []
+history_size = 5
 
-# Baş duruşu ve bakış yönü işlemleri
-rotation_matrix, angles = head_pose_estimator.calculate_head_pose(landmarks, frame)
-frame = head_pose_estimator.visualize_head_pose(frame, landmarks)
-frame, normalized_face = gaze_detector.visualize_gaze(frame, landmarks, frame_skip=3)
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        break
+    
+    # Yüz landmarkları tespit et
+    landmarks, face_detected = face_detector.detect_face_landmarks(frame)
+    
+    if face_detected:
+        # Baş duruşunu hesapla
+        rotation_matrix, angles = head_pose_estimator.calculate_head_pose(landmarks, frame)
+        roll, pitch, yaw = angles
+        
+        # Açıları yumuşatmak için geçmiş verilere ekle
+        pitch_history.append(pitch)
+        yaw_history.append(yaw)
+        roll_history.append(roll)
+        
+        # Geçmiş verileri sınırla
+        if len(pitch_history) > history_size:
+            pitch_history.pop(0)
+            yaw_history.pop(0)
+            roll_history.pop(0)
+        
+        # Yumuşatılmış açıları hesapla
+        smooth_pitch = sum(pitch_history) / len(pitch_history)
+        smooth_yaw = sum(yaw_history) / len(yaw_history)
+        smooth_roll = sum(roll_history) / len(roll_history)
+        
+        # Görselleştir
+        frame = head_pose_estimator.visualize_head_pose(
+            frame, landmarks, show_axes=True, show_angles=True, visualization_type='cube'
+        )
+        
+        # Açıları ekrana yazdır
+        cv2.putText(
+            frame, f"Pitch: {smooth_pitch:.1f}°", (10, 30),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2
+        )
+        cv2.putText(
+            frame, f"Yaw: {smooth_yaw:.1f}°", (10, 60),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2
+        )
+        cv2.putText(
+            frame, f"Roll: {smooth_roll:.1f}°", (10, 90),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2
+        )
+        
+        # Baş pozisyonu uyarısı
+        if abs(smooth_pitch) > 20 or abs(smooth_yaw) > 30:
+            cv2.putText(
+                frame, "UYARI: Başınızı düz tutun!", (10, 120),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2
+            )
+    
+    # Görüntüyü göster
+    cv2.imshow("Head Pose Estimation", frame)
+    
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+# Kaynakları serbest bırak
+cap.release()
+face_detector.release()
+cv2.destroyAllWindows()
+```
+
+### 4. PERCLOS Hesaplama ve İzleme
+
+Göz kapalılık süresini izleyerek PERCLOS değerini hesaplama:
+
+```python
+from src.utils import get_mediapipe_helper
+from src.utils.facial_metrics import get_eye_aspect_ratio, get_perclos
+import cv2
+import numpy as np
+import time
+
+# MediaPipeHelper örneği oluştur
+mp_helper = get_mediapipe_helper()
+
+# Kamerayı başlat
+cap = cv2.VideoCapture(0)
+
+# PERCLOS için gerekli değişkenler
+ear_threshold = 0.21  # Göz kapalılık eşiği
+eye_state_history = []  # 0: kapalı, 1: açık
+fps = 30  # Tahmini FPS
+window_seconds = 30  # PERCLOS hesaplama penceresi (saniye)
+
+# Zamanlayıcı
+start_time = time.time()
+frame_count = 0
+
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        break
+    
+    frame_count += 1
+    
+    # Yüz landmarkları tespit et
+    landmarks, face_detected = mp_helper.detect_face_landmarks(frame)
+    
+    if face_detected:
+        # Göz landmarkları al
+        left_eye = mp_helper.get_eye_landmarks(landmarks, left_eye=True)
+        right_eye = mp_helper.get_eye_landmarks(landmarks, left_eye=False)
+        
+        # EAR hesapla
+        left_ear = mp_helper.get_eye_aspect_ratio(left_eye)
+        right_ear = mp_helper.get_eye_aspect_ratio(right_eye)
+        avg_ear = (left_ear + right_ear) / 2.0
+        
+        # Göz durumunu belirle
+        is_eye_closed = avg_ear < ear_threshold
+        eye_state_history.append(0 if is_eye_closed else 1)
+        
+        # Geçmiş verileri sınırla
+        max_history_frames = window_seconds * fps
+        if len(eye_state_history) > max_history_frames:
+            eye_state_history = eye_state_history[-max_history_frames:]
+        
+        # PERCLOS hesapla
+        perclos = get_perclos(eye_state_history, window_seconds, fps)
+        
+        # Görselleştir
+        eye_color = (0, 0, 255) if is_eye_closed else (0, 255, 0)
+        for eye in [left_eye, right_eye]:
+            pts = np.array([(int(p[0]), int(p[1])) for p in eye], np.int32)
+            pts = pts.reshape((-1, 1, 2))
+            cv2.polylines(frame, [pts], True, eye_color, 1)
+        
+        # Sonuçları göster
+        cv2.putText(
+            frame, f"EAR: {avg_ear:.3f}", (10, 30),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.7, eye_color, 2
+        )
+        
+        perclos_color = (0, 255, 0)  # Yeşil (normal)
+        if perclos > 15:
+            perclos_color = (0, 165, 255)  # Turuncu (uyarı)
+        if perclos > 20:
+            perclos_color = (0, 0, 255)  # Kırmızı (tehlike)
+            
+        cv2.putText(
+            frame, f"PERCLOS: {perclos:.2f}%", (10, 60),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.7, perclos_color, 2
+        )
+        
+        if perclos > 20:
+            cv2.putText(
+                frame, "UYARI: Uykululuk Tespit Edildi!", (10, 90),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2
+            )
+    
+    # FPS hesapla
+    if frame_count % 30 == 0:  # Her 30 karede bir FPS güncelle
+        end_time = time.time()
+        fps = 30 / (end_time - start_time)
+        start_time = end_time
+    
+    cv2.putText(
+        frame, f"FPS: {fps:.1f}", (10, frame.shape[0] - 10),
+        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1
+    )
+    
+    # Görüntüyü göster
+    cv2.imshow("PERCLOS Monitoring", frame)
+    
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+# Kaynakları serbest bırak
+cap.release()
+mp_helper.release()
+cv2.destroyAllWindows()
+```
+
+### 5. Constants Modülünü Kullanma
+
+`constants.py` modülünü kullanarak merkezi olarak tanımlanan sabit değerleri kullanma:
+
+```python
+from src.utils import get_mediapipe_helper
+from src.utils.constants import (
+    EAR_THRESHOLD, 
+    MAR_THRESHOLD,
+    PERCLOS_WARNING_THRESHOLD,
+    PERCLOS_CRITICAL_THRESHOLD,
+    LEFT_EYE_INDICES,
+    RIGHT_EYE_INDICES
+)
+import cv2
+
+# MediaPipeHelper örneği oluştur
+mp_helper = get_mediapipe_helper()
+
+# Kamerayı başlat
+cap = cv2.VideoCapture(0)
+
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        break
+    
+    # Yüz landmarkları tespit et
+    landmarks, face_detected = mp_helper.detect_face_landmarks(frame)
+    
+    if face_detected:
+        # Göz landmarkları al - sabit indeksleri kullanarak
+        left_eye = [landmarks[i] for i in LEFT_EYE_INDICES if i < len(landmarks)]
+        right_eye = [landmarks[i] for i in RIGHT_EYE_INDICES if i < len(landmarks)]
+        
+        # EAR hesapla
+        left_ear = mp_helper.get_eye_aspect_ratio(left_eye)
+        right_ear = mp_helper.get_eye_aspect_ratio(right_eye)
+        avg_ear = (left_ear + right_ear) / 2.0
+        
+        # MAR hesapla
+        mar = mp_helper.get_mouth_aspect_ratio(landmarks)
+        
+        # Durumları kontrol et
+        eyes_closed = avg_ear < EAR_THRESHOLD
+        mouth_open = mar > MAR_THRESHOLD
+        
+        # Sonuçları görselleştir
+        eye_status = "Kapalı" if eyes_closed else "Açık"
+        mouth_status = "Açık" if mouth_open else "Kapalı"
+        
+        cv2.putText(
+            frame, f"Gözler: {eye_status} (EAR: {avg_ear:.3f})", (10, 30),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255) if eyes_closed else (0, 255, 0), 2
+        )
+        
+        cv2.putText(
+            frame, f"Ağız: {mouth_status} (MAR: {mar:.3f})", (10, 60),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255) if mouth_open else (0, 255, 0), 2
+        )
+    
+    # Görüntüyü göster
+    cv2.imshow("Facial Metrics", frame)
+    
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+# Kaynakları serbest bırak
+cap.release()
+mp_helper.release()
+cv2.destroyAllWindows()
 ```
 
 ## Yapılandırma ve Özelleştirme
