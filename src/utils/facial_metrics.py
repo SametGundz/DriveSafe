@@ -9,9 +9,20 @@ detected using MediaPipe Face Mesh.
 """
 
 import math
+import os
+import cv2
+import numpy as np
+import mediapipe as mp
+import yaml
 from typing import List, Optional, Tuple, Dict, Any, Union
 
-import numpy as np
+# Import constants
+from src.utils.constants import (
+    LEFT_EYE_INDICES, RIGHT_EYE_INDICES, 
+    LEFT_EYE_INDICES_6POINT, RIGHT_EYE_INDICES_6POINT,
+    INNER_LIP_INDICES, OUTER_LIP_INDICES, MOUTH_INDICES, MOUTH_INDICES_6POINT,
+    EAR_THRESHOLD, MAR_THRESHOLD
+)
 
 
 def calculate_distance(point1: List[float], point2: List[float]) -> float:
@@ -249,17 +260,15 @@ def get_perclos(eye_state_history: List[int], window_seconds: int = 60, fps: int
     if not eye_state_history:
         return 0.0
     
-    # Hesaplanacak kare sayısı
-    window_size = window_seconds * fps
+    # Calculate window size in frames
+    window_size = min(len(eye_state_history), window_seconds * fps)
     
-    # Son window_size kadar kareyi al veya tümünü
-    history = eye_state_history[-min(window_size, len(eye_state_history)):]
+    # Get recent history within the window
+    recent_history = eye_state_history[-window_size:]
     
-    # Kapalı göz sayısı (0 değerleri)
-    closed_count = history.count(0)
-    
-    # PERCLOS hesaplama
-    perclos = closed_count / len(history)
+    # Calculate PERCLOS
+    closed_frames = sum(1 for state in recent_history if state == 0)
+    perclos = (closed_frames / window_size) * 100.0 if window_size > 0 else 0.0
     
     return perclos
 
@@ -268,71 +277,201 @@ def is_blinking(ear: float, threshold: float = 0.21,
                consecutive_frames: int = 3, 
                ear_history: Optional[List[float]] = None) -> Tuple[bool, Optional[List[float]]]:
     """
-    Detect if the eye is blinking based on EAR value.
+    Detect if the eye is blinking based on EAR values.
     
     Args:
-        ear: Current Eye Aspect Ratio
-        threshold: EAR threshold below which the eye is considered closed
-        consecutive_frames: Number of consecutive frames below threshold to confirm blink
-        ear_history: Optional history of EAR values to track blink
+        ear: Current eye aspect ratio
+        threshold: EAR threshold for closed eyes
+        consecutive_frames: Number of consecutive frames below threshold to consider a blink
+        ear_history: History of EAR values
         
     Returns:
-        Tuple containing:
-        - Whether the eye is blinking
-        - Updated ear_history list
+        Tuple of (is_blinking, updated_ear_history)
     """
-    # EAR geçmişini başlat
+    # Initialize history if not provided
     if ear_history is None:
         ear_history = []
     
-    # Mevcut EAR değerini geçmişe ekle
+    # Add current EAR to history
     ear_history.append(ear)
     
-    # Geçmişi belli bir uzunlukta tut
-    if len(ear_history) > consecutive_frames * 2:
-        ear_history = ear_history[-consecutive_frames * 2:]
+    # Keep only recent history
+    max_history_len = consecutive_frames * 3  # 3x to include before, during, after blink
+    if len(ear_history) > max_history_len:
+        ear_history = ear_history[-max_history_len:]
     
-    # Son consecutive_frames kadar kareye bak
-    recent_ears = ear_history[-consecutive_frames:]
+    # Check if the eye is considered blinking
+    is_blinking_now = False
     
-    # Tüm son kareler eşik değerinin altındaysa göz kırpma
-    is_blink = all(e < threshold for e in recent_ears)
+    # Only check if we have enough history
+    if len(ear_history) >= consecutive_frames:
+        # Get the most recent EAR values
+        recent_ear = ear_history[-consecutive_frames:]
+        # Check if all recent EAR values are below threshold
+        is_blinking_now = all(e < threshold for e in recent_ear)
     
-    return is_blink, ear_history
+    return is_blinking_now, ear_history
 
 
 def is_yawning(mar: float, threshold: float = 0.5, 
               consecutive_frames: int = 5,
               mar_history: Optional[List[float]] = None) -> Tuple[bool, Optional[List[float]]]:
     """
-    Detect if the mouth is yawning based on MAR value.
+    Detect if the person is yawning based on MAR values.
     
     Args:
-        mar: Current Mouth Aspect Ratio
-        threshold: MAR threshold above which the mouth is considered yawning
-        consecutive_frames: Number of consecutive frames above threshold to confirm yawn
-        mar_history: Optional history of MAR values to track yawn
+        mar: Current mouth aspect ratio
+        threshold: MAR threshold for open mouth
+        consecutive_frames: Number of consecutive frames above threshold to consider a yawn
+        mar_history: History of MAR values
         
     Returns:
-        Tuple containing:
-        - Whether the mouth is yawning
-        - Updated mar_history list
+        Tuple of (is_yawning, updated_mar_history)
     """
-    # MAR geçmişini başlat
+    # Initialize history if not provided
     if mar_history is None:
         mar_history = []
     
-    # Mevcut MAR değerini geçmişe ekle
+    # Add current MAR to history
     mar_history.append(mar)
     
-    # Geçmişi belli bir uzunlukta tut
-    if len(mar_history) > consecutive_frames * 2:
-        mar_history = mar_history[-consecutive_frames * 2:]
+    # Keep only recent history
+    max_history_len = consecutive_frames * 3  # 3x to include before, during, after yawn
+    if len(mar_history) > max_history_len:
+        mar_history = mar_history[-max_history_len:]
     
-    # Son consecutive_frames kadar kareye bak
-    recent_mars = mar_history[-consecutive_frames:]
+    # Check if the person is considered yawning
+    is_yawning_now = False
     
-    # Tüm son kareler eşik değerinin üstündeyse esneme
-    is_yawn = all(m > threshold for m in recent_mars)
+    # Only check if we have enough history
+    if len(mar_history) >= consecutive_frames:
+        # Get the most recent MAR values
+        recent_mar = mar_history[-consecutive_frames:]
+        # Check if all recent MAR values are above threshold
+        is_yawning_now = all(m > threshold for m in recent_mar)
     
-    return is_yawn, mar_history
+    return is_yawning_now, mar_history
+
+
+def calculate_ear_mar(landmarks: List[List[float]]) -> Tuple[float, float, float, float]:
+    """
+    Calculate EAR and MAR values from facial landmarks.
+    
+    This function combines EAR and MAR calculations for convenience.
+    
+    Args:
+        landmarks: Full list of facial landmarks
+        
+    Returns:
+        Tuple of (left_ear, right_ear, avg_ear, mar)
+    """
+    # Get eye landmarks
+    left_eye = [landmarks[i] for i in LEFT_EYE_INDICES if i < len(landmarks)]
+    right_eye = [landmarks[i] for i in RIGHT_EYE_INDICES if i < len(landmarks)]
+    
+    # Get mouth landmarks
+    mouth = [landmarks[i] for i in MOUTH_INDICES if i < len(landmarks)]
+    
+    # Calculate metrics
+    left_ear = get_eye_aspect_ratio(left_eye)
+    right_ear = get_eye_aspect_ratio(right_eye)
+    avg_ear = (left_ear + right_ear) / 2.0
+    mar = get_mouth_aspect_ratio(mouth)
+    
+    return left_ear, right_ear, avg_ear, mar
+
+
+def detect_ear_mar(frame: np.ndarray) -> Tuple[Optional[float], Optional[float], bool, bool]:
+    """
+    Detect EAR and MAR values from a frame.
+    
+    This function integrates the functionality from EARMARDetector for direct frame processing.
+    
+    Args:
+        frame: Input frame/image
+        
+    Returns:
+        Tuple containing:
+        - Average EAR value (None if no face detected)
+        - MAR value (None if no face detected)
+        - Boolean indicating if eyes are closed
+        - Boolean indicating if mouth is open
+    """
+    # Initialize MediaPipe FaceMesh
+    mp_face_mesh = mp.solutions.face_mesh
+    face_mesh = mp_face_mesh.FaceMesh(
+        max_num_faces=1,
+        refine_landmarks=True,
+        min_detection_confidence=0.5,
+        min_tracking_confidence=0.5
+    )
+    
+    # Convert the BGR image to RGB
+    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    
+    # Get frame dimensions
+    h, w, _ = frame.shape
+    
+    # Process the frame with MediaPipe FaceMesh
+    results = face_mesh.process(rgb_frame)
+    
+    # Default return values if no face is detected
+    avg_ear = None
+    mar = None
+    eyes_closed = False
+    mouth_open = False
+    
+    if results.multi_face_landmarks:
+        # Get the first face detected
+        face_landmarks = results.multi_face_landmarks[0]
+        
+        # Convert normalized coordinates to pixel coordinates
+        landmarks = []
+        for landmark in face_landmarks.landmark:
+            x, y, z = landmark.x * w, landmark.y * h, landmark.z
+            landmarks.append([x, y, z])
+        
+        # Get landmarks for 6-point eye model
+        left_eye = [landmarks[i] for i in LEFT_EYE_INDICES_6POINT if i < len(landmarks)]
+        right_eye = [landmarks[i] for i in RIGHT_EYE_INDICES_6POINT if i < len(landmarks)]
+        mouth = [landmarks[i] for i in MOUTH_INDICES_6POINT if i < len(landmarks)]
+        
+        # Calculate EAR for each eye
+        left_ear = get_eye_aspect_ratio(left_eye)
+        right_ear = get_eye_aspect_ratio(right_eye)
+        
+        # Calculate average EAR
+        avg_ear = (left_ear + right_ear) / 2.0
+        
+        # Calculate MAR
+        mar = get_mouth_aspect_ratio(mouth)
+        
+        # Determine if eyes are closed and mouth is open based on thresholds
+        eyes_closed = avg_ear < EAR_THRESHOLD
+        mouth_open = mar > MAR_THRESHOLD
+    
+    # Release MediaPipe resources
+    face_mesh.close()
+    
+    return avg_ear, mar, eyes_closed, mouth_open
+
+
+def load_config() -> Dict:
+    """
+    Load configuration from YAML file.
+    
+    Returns:
+        Dict: Configuration dictionary
+    """
+    # Get the project root directory (3 levels up from this file)
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
+    config_path = os.path.join(project_root, 'config', 'config.yaml')
+    
+    try:
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+            return config if config else {}
+    except (FileNotFoundError, yaml.YAMLError):
+        print(f"Warning: Could not load config file at {config_path}. Using default values.")
+        return {}

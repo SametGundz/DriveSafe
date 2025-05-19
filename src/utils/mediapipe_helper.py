@@ -15,135 +15,62 @@ in the driver drowsiness detection system, including:
 import os
 import cv2
 import yaml
+import logging
 from typing import List, Tuple, Optional, Dict, Any
 
 import numpy as np
 
-from src.utils.face_landmark_detector import FaceLandmarkDetector, get_face_landmark_detector
+from src.utils.face_landmark_detector import FaceLandmarkDetector
 from src.utils.facial_metrics import get_eye_aspect_ratio, get_mouth_aspect_ratio
 from src.utils.head_pose_estimator import HeadPoseEstimator
 from src.utils.gaze_detector import GazeDetector
 
+# Get the module logger
+logger = logging.getLogger(__name__)
 
-class MediaPipeHelper:
+class MediaPipeHelper(FaceLandmarkDetector):
     """
     Unified helper class that integrates all MediaPipe-based modular components.
     
-    This class provides a simplified interface to use all the functionality offered by
-    the individual modular components in a unified manner, similar to the legacy
-    MediaPipeUtils class but with better internal organization.
+    This class extends FaceLandmarkDetector and integrates other components
+    like HeadPoseEstimator and GazeDetector to provide a comprehensive
+    interface for face analysis.
     """
     
-    def __init__(self, face_detector=None, head_pose_estimator=None, gaze_detector=None):
+    def __init__(self, 
+                static_image_mode: bool = False, 
+                max_num_faces: int = 1,
+                refine_landmarks: bool = True,
+                min_detection_confidence: float = 0.5,
+                min_tracking_confidence: float = 0.5,
+                head_pose_estimator: Optional[HeadPoseEstimator] = None,
+                gaze_detector: Optional[GazeDetector] = None):
         """
         Initialize the MediaPipeHelper with all required components.
         
         Args:
-            face_detector: Optional FaceLandmarkDetector instance
+            static_image_mode: Whether to treat the input images as a batch of static images
+            max_num_faces: Maximum number of faces to detect
+            refine_landmarks: Whether to refine the landmark coordinates
+            min_detection_confidence: Minimum confidence value for face detection
+            min_tracking_confidence: Minimum confidence value for face tracking
             head_pose_estimator: Optional HeadPoseEstimator instance
             gaze_detector: Optional GazeDetector instance
         """
-        # Initialize or use provided components
-        self.face_detector = face_detector or get_face_landmark_detector()
+        # Initialize parent class (FaceLandmarkDetector)
+        super().__init__(
+            static_image_mode=static_image_mode,
+            max_num_faces=max_num_faces,
+            refine_landmarks=refine_landmarks,
+            min_detection_confidence=min_detection_confidence,
+            min_tracking_confidence=min_tracking_confidence
+        )
+        
+        # Initialize other components
         self.head_pose_estimator = head_pose_estimator or HeadPoseEstimator()
         self.gaze_detector = gaze_detector or GazeDetector()
-    
-    def detect_face_landmarks(self, frame):
-        """
-        Detect facial landmarks in the frame.
         
-        Args:
-            frame: Input image frame
-            
-        Returns:
-            tuple: (landmarks, face_detected) - landmarks list and boolean face detection flag
-        """
-        return self.face_detector.detect_face_landmarks(frame)
-    
-    def get_face_rect(self, landmarks, padding=0.1):
-        """
-        Get the rectangle containing the face.
-        
-        Args:
-            landmarks: Facial landmarks
-            padding: Padding around the face rect (percentage of size)
-            
-        Returns:
-            tuple: (x, y, w, h) - face rectangle coordinates
-        """
-        return self.face_detector.get_face_rect(landmarks, padding)
-    
-    def get_eye_landmarks(self, landmarks, left_eye=True):
-        """
-        Get eye landmarks.
-        
-        Args:
-            landmarks: Facial landmarks
-            left_eye: Flag to get left eye (True) or right eye (False)
-            
-        Returns:
-            list: Eye landmarks
-        """
-        return self.face_detector.get_eye_landmarks(landmarks, left_eye)
-    
-    def get_mouth_landmarks(self, landmarks):
-        """
-        Get mouth landmarks.
-        
-        Args:
-            landmarks: Facial landmarks
-            
-        Returns:
-            list: Mouth landmarks
-        """
-        return self.face_detector.get_mouth_landmarks(landmarks)
-    
-    def get_inner_lip_landmarks(self, landmarks):
-        """
-        Get inner lip landmarks.
-        
-        Args:
-            landmarks: Facial landmarks
-            
-        Returns:
-            list: Inner lip landmarks
-        """
-        return self.face_detector.get_inner_lip_landmarks(landmarks)
-    
-    def get_outer_lip_landmarks(self, landmarks):
-        """
-        Get outer lip landmarks.
-        
-        Args:
-            landmarks: Facial landmarks
-            
-        Returns:
-            list: Outer lip landmarks
-        """
-        return self.face_detector.get_outer_lip_landmarks(landmarks)
-    
-    def draw_facial_landmarks(self, frame, landmarks, connections=None,
-                           landmark_color=(0, 255, 0), connection_color=(255, 0, 0),
-                           landmark_radius=1, connection_thickness=1):
-        """
-        Draw facial landmarks on the frame.
-        
-        Args:
-            frame: Input image frame
-            landmarks: Facial landmarks
-            connections: Optional list of connections between landmarks
-            landmark_color: Color for landmarks
-            connection_color: Color for connections
-            landmark_radius: Radius of landmark circles
-            connection_thickness: Thickness of connection lines
-            
-        Returns:
-            ndarray: Frame with drawn landmarks
-        """
-        return self.face_detector.draw_facial_landmarks(
-            frame, landmarks, connections, landmark_color, connection_color,
-            landmark_radius, connection_thickness
-        )
+        logger.info("MediaPipeHelper initialized with all components")
     
     def get_eye_aspect_ratio(self, eye_landmarks):
         """
@@ -262,9 +189,19 @@ class MediaPipeHelper:
     
     def release(self):
         """
-        Release resources.
+        Release all resources.
         """
-        self.face_detector.release()
+        # Release parent class resources
+        super().release()
+        
+        # Release other components
+        if hasattr(self.head_pose_estimator, 'release'):
+            self.head_pose_estimator.release()
+        
+        if hasattr(self.gaze_detector, 'release'):
+            self.gaze_detector.release()
+        
+        logger.info("MediaPipeHelper resources released")
 
 
 def get_mediapipe_helper():
@@ -274,6 +211,7 @@ def get_mediapipe_helper():
     Returns:
         MediaPipeHelper: A MediaPipeHelper instance
     """
+    logger.debug("Creating new MediaPipeHelper instance")
     return MediaPipeHelper()
 
 
@@ -286,7 +224,11 @@ def load_ui_config():
     """
     config_path = os.path.join("config", "ui_config.yaml")
     
-    with open(config_path, 'r', encoding='utf-8') as config_file:
-        config = yaml.safe_load(config_file)
-    
-    return config 
+    try:
+        with open(config_path, 'r', encoding='utf-8') as config_file:
+            config = yaml.safe_load(config_file)
+        logger.info(f"UI configuration loaded from {config_path}")
+        return config
+    except Exception as e:
+        logger.error(f"Error loading UI config: {str(e)}")
+        return {} 

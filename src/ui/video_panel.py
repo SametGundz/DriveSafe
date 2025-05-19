@@ -8,10 +8,13 @@ This module implements a widget for displaying the video feed from the camera.
 """
 
 import cv2
+import logging
 from PyQt6.QtWidgets import QLabel, QFrame, QSizePolicy
 from PyQt6.QtGui import QPixmap, QImage
 from PyQt6.QtCore import Qt, QSize
 
+# Get module-specific logger
+logger = logging.getLogger(__name__)
 
 class VideoPanel(QLabel):
     """
@@ -58,6 +61,8 @@ class VideoPanel(QLabel):
             border: 1px solid #e1e1e1;
             border-radius: 4px;
         """)
+        
+        logger.debug(f"VideoPanel initialized with size: {panel_width}x{panel_height}")
     
     def update_frame(self, frame):
         """
@@ -67,26 +72,33 @@ class VideoPanel(QLabel):
             frame: OpenCV BGR image
         """
         if frame is None:
+            logger.warning("Received None frame in update_frame")
             self.setText("Kamera görüntüsü alınamadı")
             return
             
-        # Convert BGR to RGB
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        
-        # Convert to QImage
-        h, w, ch = rgb_frame.shape
-        bytes_per_line = ch * w
-        q_img = QImage(rgb_frame.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
-        
-        # Convert to QPixmap and set to label
-        pixmap = QPixmap.fromImage(q_img)
-        
-        # Scale pixmap to fit label while maintaining aspect ratio
-        self.setPixmap(pixmap.scaled(
-            self.size(),
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation
-        ))
+        try:
+            # Convert BGR to RGB
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            
+            # Convert to QImage
+            h, w, ch = rgb_frame.shape
+            bytes_per_line = ch * w
+            q_img = QImage(rgb_frame.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
+            
+            # Convert to QPixmap and set to label
+            pixmap = QPixmap.fromImage(q_img)
+            
+            # Scale pixmap to fit label while maintaining aspect ratio
+            self.setPixmap(pixmap.scaled(
+                self.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            ))
+            
+            logger.debug(f"Frame updated: {w}x{h}")
+        except Exception as e:
+            logger.error(f"Error updating video frame: {str(e)}")
+            self.setText(f"Görüntü işleme hatası: {str(e)}")
     
     def resizeEvent(self, event):
         """
@@ -104,4 +116,6 @@ class VideoPanel(QLabel):
                 event.size(),
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation
-            )) 
+            ))
+            
+            logger.debug(f"VideoPanel resized to: {event.size().width()}x{event.size().height()}") 

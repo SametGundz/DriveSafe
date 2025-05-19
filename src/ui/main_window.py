@@ -31,6 +31,8 @@ from src.ui.menu_manager import MenuManager
 from src.ui.dialogs import SettingsDialog, AboutDialog
 from src.ui.graph_utils import ExpandedChartsWindow, create_chart_data_from_series
 
+# Import logger for application
+from src.utils.logger import DrowsinessLogger
 
 class DriverDrowsinessMainWindow(QMainWindow):
     """
@@ -65,6 +67,21 @@ class DriverDrowsinessMainWindow(QMainWindow):
         # Load configuration
         self.config = load_ui_config()
         
+        # Set up logging
+        self.logger = logging.getLogger(__name__)
+        
+        # Create drowsiness logger instance
+        self.drowsiness_logger_instance = DrowsinessLogger(
+            name='ui',
+            console_level='info',
+            file_level='debug',
+            config=self.config
+        )
+        # Get the actual logger from the instance
+        self.drowsiness_logger = self.drowsiness_logger_instance
+        
+        self.logger.info("Main window initialization started")
+        
         # Initialize UI
         self._init_ui()
         
@@ -83,9 +100,7 @@ class DriverDrowsinessMainWindow(QMainWindow):
         self.eye_closure_history = []
         self.max_history_frames = int(self.config.get('detection', {}).get('perclos_window_sec', 60) * self.camera_fps)
         
-        # Set up logging
-        self.logger = logging.getLogger(__name__)
-        self.logger.info("Main window initialized")
+        self.logger.info("Main window initialized successfully")
     
     def _init_ui(self):
         """
@@ -310,93 +325,103 @@ class DriverDrowsinessMainWindow(QMainWindow):
         self.update_status(f"Bakış yönü {status}")
     
     def on_start(self):
-        """Handle start button click."""
+        """Start drowsiness detection."""
         if self.is_capturing:
+            self.logger.warning("Detection already running, start button ignored")
             return
             
-        self.control_panel.update_start_stop_state(True)
+        self.logger.info("Starting drowsiness detection")
         
-        # Try to open the camera
         try:
-            print(f"INFO: Attempting to open camera ID: {self.camera_id}")
+            # Initialize MediaPipe helper
+            if not self.mediapipe_helper:
+                self.mediapipe_helper = get_mediapipe_helper()
+                self.logger.debug("MediaPipe helper initialized")
+            
+            # Open camera
             self.cap = cv2.VideoCapture(self.camera_id)
             
-            # Set camera properties from config
-            camera_width = self.config.get('camera', {}).get('width', 640)
-            camera_height = self.config.get('camera', {}).get('height', 480)
-            camera_fps = self.config.get('camera', {}).get('fps', 30)
+            # Set camera properties
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.camera_width)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.camera_height)
+            self.cap.set(cv2.CAP_PROP_FPS, self.camera_fps)
             
-            print(f"INFO: Setting camera properties: width={camera_width}, height={camera_height}, fps={camera_fps}")
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, camera_width)
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, camera_height)
-            self.cap.set(cv2.CAP_PROP_FPS, camera_fps)
-            
+            # Check if camera opened successfully
             if not self.cap.isOpened():
-                error_msg = "Kamera açılamadı! Kamera bağlantısını kontrol edin."
-                print(f"ERROR: {error_msg}")
+                error_msg = "Camera açılamadı! Kamera bağlantısını kontrol edin."
+                self.logger.error(f"Camera open failed: {error_msg}")
                 self.update_status(error_msg)
-                self.control_panel.update_start_stop_state(False)
                 return
                 
-            # Initialize MediaPipe - use the new MediaPipeHelper
-            self.mediapipe_helper = get_mediapipe_helper()
-            
-            # Get actual camera properties after setting
+            # Read camera properties (may be different from requested)
             actual_width = self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)
             actual_height = self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
             actual_fps = self.cap.get(cv2.CAP_PROP_FPS)
-            print(f"INFO: Actual camera properties: width={actual_width}, height={actual_height}, fps={actual_fps}")
-                
-            # Start the camera timer
-            self.is_capturing = True
+            
+            self.logger.info(f"Camera opened: ID={self.camera_id}, resolution={actual_width}x{actual_height}, FPS={actual_fps}")
+            
+            # Reset counter and start camera timer
+            self._frame_counter = 0
             self.camera_timer.start(self.update_interval_ms)
             
-            # Start chart update timer (demo)
+            # Start chart timer
             self.time_counter = 0.0
-            self.chart_timer.start(int(self.update_interval_sec * 1000))  # Milisaniyeye çevir
+            self.chart_timer.start(int(self.update_interval_sec * 1000))
             
-            # Reset PERCLOS calculation
-            self.eye_closure_history = []
-            # Başlangıçta göz açık kabul edilerek history'yi doldur
-            for _ in range(min(20, self.max_history_frames)):
-                self.eye_closure_history.append(0)  # Göz açık (0) olarak ekle
+            # Initialize drowsiness detection
+            from src.detection.drowsiness_detector import DrowsinessDetector
+            self.drowsiness_detector = DrowsinessDetector()
             
-            self.update_status("Algılama başlatıldı.")
-            print("INFO: Camera capture started successfully")
+            # Update UI state
+            self.is_capturing = True
+            self.control_panel.update_start_stop_state(True)
+            
+            # Reset metrics chart
+            self.chart_panel.reset()
+            
+            # Update status
+            self.update_status("Uykululuk tespiti başlatıldı.")
+            self.logger.info("Drowsiness detection started successfully")
+            
         except Exception as e:
-            error_msg = f"Kamera başlatılamadı: {str(e)}"
-            print(f"ERROR: {error_msg}")
-            import traceback
-            traceback.print_exc()  # Print detailed exception
+            error_msg = f"Kamera başlatma hatası: {str(e)}"
+            self.logger.exception(f"Error starting camera: {str(e)}")
             self.update_status(error_msg)
-            self.control_panel.update_start_stop_state(False)
     
     def on_stop(self):
-        """Handle stop button click."""
-        self.control_panel.update_start_stop_state(False)
+        """Stop drowsiness detection."""
+        if not self.is_capturing:
+            self.logger.warning("Detection not running, stop button ignored")
+            return
+            
+        self.logger.info("Stopping drowsiness detection")
         
-        # Stop the camera capture
-        self.is_capturing = False
-        self.camera_timer.stop()
-        
-        # Stop chart update timer
-        if hasattr(self, 'chart_timer'):
+        # Stop timers
+        if self.camera_timer.isActive():
+            self.camera_timer.stop()
+            
+        if self.chart_timer.isActive():
             self.chart_timer.stop()
         
-        # Release the camera
-        if self.cap is not None:
+        # Release camera
+        if self.cap and self.cap.isOpened():
             self.cap.release()
             self.cap = None
+            self.logger.debug("Camera released")
         
-        # Release MediaPipe resources
-        if self.mediapipe_helper is not None:
+        # Reset UI state
+        self.is_capturing = False
+        self.control_panel.update_start_stop_state(False)
+        
+        # Free MediaPipe resources
+        if self.mediapipe_helper:
             self.mediapipe_helper.release()
             self.mediapipe_helper = None
+            self.logger.debug("MediaPipe helper resources released")
         
-        # Clear the video frame
-        self.video_panel.setText("Kamera görüntüsü burada gösterilecek")
-        
-        self.update_status("Algılama durduruldu.")
+        # Update status
+        self.update_status("Uykululuk tespiti durduruldu.")
+        self.logger.info("Drowsiness detection stopped")
     
     def _update_camera_frame(self):
         """Update the video frame with current camera image."""
@@ -411,15 +436,10 @@ class DriverDrowsinessMainWindow(QMainWindow):
         
         if not ret:
             error_msg = "Kameradan görüntü alınamadı!"
-            print(f"ERROR: {error_msg}")
+            self.logger.error(f"Failed to read frame from camera: {error_msg}")
             self.update_status(error_msg)
             self.on_stop()
             return
-            
-        # Print frame info occasionally (every 30 frames ~ 1 second)
-        if getattr(self, '_frame_counter', 0) % 30 == 0:
-            print(f"INFO: Frame received - shape: {frame.shape}")
-        self._frame_counter = getattr(self, '_frame_counter', 0) + 1
             
         # Mirror the frame horizontally (selfie view)
         frame = cv2.flip(frame, 1)
@@ -468,10 +488,35 @@ class DriverDrowsinessMainWindow(QMainWindow):
                     perclos = 0.0
                 else:
                     perclos = (sum(self.eye_closure_history) / len(self.eye_closure_history)) * 100.0
-            
-            # ÖNEMLİ: Önce baş duruşu ve göz bakış yönü hesaplaması yap
-            # Çünkü bu hesaplamalar orijinal landmark'ları kullanmalı
-            
+                    
+            # Log drowsiness data periodically (every 30 frames)
+            if getattr(self, '_frame_counter', 0) % 30 == 0:
+                # Get the drowsiness level from the detector
+                drowsiness_level = 0
+                if hasattr(self, 'drowsiness_detector'):
+                    drowsiness_level = getattr(self.drowsiness_detector, 'drowsiness_level', 0)
+                
+                alert_status = drowsiness_level > 0.5
+                # Use the instance directly
+                try:
+                    self.drowsiness_logger_instance.log_drowsiness_data(
+                        ear=ear,
+                        mar=mar,
+                        perclos=perclos,
+                        kss_score=None,  # We don't have KSS score here
+                        alert_status=alert_status
+                    )
+                    
+                    # Also log system status
+                    current_fps = 1.0 / (time.time() - frame_start_time) if (time.time() - frame_start_time) > 0 else 0
+                    self.drowsiness_logger_instance.log_system_status(
+                        fps=current_fps,
+                        frame_count=getattr(self, '_frame_counter', 0),
+                        status="Running" if self.is_capturing else "Stopped"
+                    )
+                except Exception as e:
+                    self.logger.error(f"Error logging drowsiness data: {str(e)}")
+                
             # Görüntünün bir kopyasını oluştur
             processed_frame = frame.copy()
             
@@ -546,20 +591,14 @@ class DriverDrowsinessMainWindow(QMainWindow):
                 )
             
             # Update drowsiness detection
-            from src.detection.drowsiness_detector import DrowsinessDetector
-            drowsiness_detector = getattr(self, 'drowsiness_detector', None)
-            if drowsiness_detector is None:
-                self.drowsiness_detector = DrowsinessDetector()
-                drowsiness_detector = self.drowsiness_detector
-                
-            # Update drowsiness state with eye metrics only
-            drowsiness_result = drowsiness_detector.update(
-                ear_left=left_ear,
-                ear_right=right_ear
+            drowsiness_result = self.drowsiness_detector.update(
+                ear_value=ear,
+                head_pose=None,
+                gaze_direction=None
             )
             
             # Visualize drowsiness detection results
-            processed_frame = drowsiness_detector.visualize(
+            processed_frame = self.drowsiness_detector.visualize(
                 processed_frame, 
                 ear_left=left_ear, 
                 ear_right=right_ear,
@@ -591,6 +630,9 @@ class DriverDrowsinessMainWindow(QMainWindow):
         
         # Update metrics UI
         self.metrics_panel.update_metrics(ear, mar, perclos)
+        
+        # Increment frame counter
+        self._frame_counter = getattr(self, '_frame_counter', 0) + 1
     
     def _update_chart_data(self):
         """Update the chart with new data points."""
@@ -625,9 +667,19 @@ class DriverDrowsinessMainWindow(QMainWindow):
 
     def closeEvent(self, event):
         """Handle window close event."""
-        # Stop the camera if it's running
+        self.logger.info("Application closing")
+        
+        # Stop detection if running
         if self.is_capturing:
             self.on_stop()
+        
+        # Log application shutdown
+        try:
+            self.drowsiness_logger_instance.log_shutdown()
+        except Exception as e:
+            self.logger.error(f"Error logging shutdown: {str(e)}")
+        
+        # Accept the close event
         event.accept()
 
     def _show_expanded_charts(self):

@@ -2,303 +2,466 @@
 # -*- coding: utf-8 -*-
 
 """
-Drowsiness Detector (Uykululuk Tespit) modülü.
+Drowsiness detector module.
 
-Bu modül, sürücünün uykululuk durumunu tespit etmek için çeşitli özellikleri (göz kapalılık, 
-bakış yönü, baş duruşu vb.) kullanarak bir uykululuk seviyesi belirleme mekanizması sunar.
+This module provides functionality to detect drowsiness based on various metrics:
+- Eye closure duration (using Eye Aspect Ratio)
+- PERCLOS (percentage of eye closure time)
+- Head pose (indicating nodding)
+- Gaze direction
 """
 
-import cv2
-import numpy as np
 import time
+import numpy as np
 import logging
-from typing import Dict, Tuple, List, Optional, Union
-from collections import deque
+from dataclasses import dataclass, field
+from typing import List, Dict, Any, Optional, Tuple
+import cv2
 
-# Logger oluştur
-logger = logging.getLogger('driver_monitoring')
+from src.utils.constants import (
+    EAR_THRESHOLD,
+    MAR_THRESHOLD,
+    HEAD_YAW_THRESHOLD,
+    HEAD_PITCH_THRESHOLD,
+    GAZE_YAW_THRESHOLD,
+    GAZE_PITCH_THRESHOLD,
+    PERCLOS_WARNING_THRESHOLD,
+    PERCLOS_CRITICAL_THRESHOLD
+)
+from src.utils.facial_metrics import calculate_distance, get_eye_aspect_ratio, get_perclos
 
-def dist_euclid(a, b):
-    """
-    İki nokta arasındaki Öklid mesafesini hesaplar.
+# Get module-specific logger
+logger = logging.getLogger(__name__)
+
+@dataclass
+class DrowsinessState:
+    """Data class to track drowsiness detection state."""
     
-    Args:
-        a: İlk nokta koordinatları [x, y]
-        b: İkinci nokta koordinatları [x, y]
+    # Eye closure tracking
+    ear_values: List[float] = field(default_factory=list)
+    eyes_closed_start_time: Optional[float] = None
+    eyes_closed_duration: float = 0.0
     
-    Returns:
-        float: Öklid mesafesi
-    """
-    return np.sqrt((a[0] - b[0])**2 + (a[1] - b[1])**2)
-
+    # PERCLOS tracking
+    is_eyes_closed: bool = False
+    closed_time: float = 0.0
+    total_time: float = 0.0
+    perclos: float = 0.0
+    
+    # Various detection flags
+    is_drowsy_by_ear: bool = False
+    is_drowsy_by_perclos: bool = False
+    is_drowsy_by_head_pose: bool = False
+    is_drowsy_by_gaze: bool = False
+    
+    # Alert status
+    alert_active: bool = False
+    alert_start_time: Optional[float] = None
+    
 
 class DrowsinessDetector:
     """
-    Sürücü uykululuk tespiti için EAR ve bakış yönü tabanlı değerlendirme sınıfı.
+    Detects driver drowsiness using multiple indicators.
     
-    Bu sınıf, göz açıklık oranı (EAR), bakış yönü ve PERCLOS değerlerini
-    kullanarak sürücünün uykululuk seviyesini hesaplar.
+    This class combines various drowsiness indicators:
+    - Eye Aspect Ratio (EAR) for eye closure detection
+    - PERCLOS (percentage of eye closure over time)
+    - Head pose for detecting nodding
+    - Gaze direction for detecting attention loss
     """
     
-    def __init__(self, config: Optional[Dict] = None):
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
         """
-        Uykululuk dedektörünü başlatır.
+        Initialize the drowsiness detector.
         
         Args:
-            config: Dedektör yapılandırma parametreleri
+            config: Optional configuration parameters
         """
-        # Varsayılan yapılandırma
-        self.config = {
-            'ear_threshold': 0.2,                # EAR eşik değeri
-            'ear_closed_duration': 2.0,          # Göz kapalı kabul edilme süresi (saniye)
-            'ear_history_size': 150,             # EAR geçmiş değer boyutu (5 saniye @ 30fps)
-            'perclos_threshold': 0.25,           # PERCLOS eşik değeri
-            'perclos_window': 150,               # PERCLOS hesaplama penceresi (5 saniye @ 30fps)
-            'gaze_deviation_threshold': 30.0,    # Bakış sapma eşik değeri (derece)
-            'gaze_history_size': 150,            # Bakış geçmiş değer boyutu (5 saniye @ 30fps)
-            'history_duration': 5.0,             # Geçmiş verileri saklama süresi (saniye)
-            'head_pose_weight': 0.2,             # Baş duruşunun uykululuk tespitindeki ağırlığı
-            'non_forward_pose_threshold': 4.0,   # İleri bakmama eşik süresi (saniye)
-        }
+        # Load config or use defaults
+        self.config = config or {}
         
-        # Kullanıcı yapılandırmasını uygula
-        if config:
-            self.config.update(config)
+        # Parameters for EAR-based detection
+        self.ear_threshold = self.config.get('ear_threshold', EAR_THRESHOLD)
+        self.ear_time_threshold = self.config.get('ear_time_threshold', 2.0)  # seconds
         
-        # Yapılandırma parametrelerini değişkenlere aktar
-        self.ear_threshold = self.config['ear_threshold']
-        self.ear_closed_duration = self.config['ear_closed_duration']
-        self.perclos_threshold = self.config['perclos_threshold']
-        self.gaze_deviation_threshold = self.config['gaze_deviation_threshold']
-        self.history_duration = self.config['history_duration']
-        self.head_pose_weight = self.config['head_pose_weight']
-        self.non_forward_pose_threshold = self.config['non_forward_pose_threshold']
+        # Parameters for PERCLOS-based detection
+        self.perclos_window = self.config.get('perclos_window', 60.0)  # seconds
+        self.perclos_warning_threshold = self.config.get('perclos_warning_threshold', PERCLOS_WARNING_THRESHOLD)
+        self.perclos_critical_threshold = self.config.get('perclos_critical_threshold', PERCLOS_CRITICAL_THRESHOLD)
         
-        # Geçmiş verileri tutmak için kuyrukar
-        self.ear_history = deque(maxlen=int(self.history_duration * 30))
-        self.ear_values = deque(maxlen=self.config['perclos_window'])
-        self.gaze_history = deque(maxlen=int(self.history_duration * 30))
+        # Parameters for head pose detection
+        self.head_yaw_threshold = self.config.get('head_yaw_threshold', HEAD_YAW_THRESHOLD)
+        self.head_pitch_threshold = self.config.get('head_pitch_threshold', HEAD_PITCH_THRESHOLD)
         
-        # Baş duruşu geçmişi
-        self.head_pose_history = deque(maxlen=int(self.history_duration * 30))
-        self.non_forward_pose_time = 0.0
-        self.current_head_pose = "Bilinmiyor"
+        # Parameters for gaze detection
+        self.gaze_yaw_threshold = self.config.get('gaze_yaw_threshold', GAZE_YAW_THRESHOLD)
+        self.gaze_pitch_threshold = self.config.get('gaze_pitch_threshold', GAZE_PITCH_THRESHOLD)
         
-        # Durum değişkenleri
-        self.last_update_time = time.time()
-        self.is_eyes_closed = False
-        self.eyes_closed_start_time = None
-        self.perclos_value = 0.0
-        self.drowsiness_level = 0.0
-        self.drowsiness_state = "Uyanık"
+        # Alert management
+        self.alert_cooldown = self.config.get('alert_cooldown', 5.0)  # seconds
+        
+        # State tracking
+        self.state = DrowsinessState()
+        
+        logger.info(f"DrowsinessDetector initialized with thresholds: EAR={self.ear_threshold}, "
+                   f"PERCLOS warning={self.perclos_warning_threshold}, critical={self.perclos_critical_threshold}")
     
-    def calculate_ear(self, eye_landmarks: List[List[float]]) -> float:
+    def update(self, ear_value: Optional[float] = None,
+              head_pose: Optional[Tuple[float, float, float]] = None,
+              gaze_direction: Optional[Tuple[float, float]] = None) -> Dict[str, Any]:
         """
-        Göz işaret noktalarından EAR (Göz Açıklık Oranı) hesaplar.
-        
-        Bu metod, bir göze ait 6 landmark noktasını kullanarak EAR değerini hesaplar.
+        Update the drowsiness detection state with new data.
         
         Args:
-            eye_landmarks: Göz işaret noktaları koordinatları
+            ear_value: Current Eye Aspect Ratio value
+            head_pose: Current head pose as (roll, pitch, yaw)
+            gaze_direction: Current gaze direction as (yaw, pitch)
             
         Returns:
-            float: Hesaplanan EAR değeri
-        """
-        # Göz işaret noktaları eksikse None döndür
-        if len(eye_landmarks) < 6:
-            logger.warning(f"Yetersiz göz noktası sayısı: {len(eye_landmarks)}")
-            return 0.0
-        
-        # Göz genişliği (yatay mesafe)
-        a = dist_euclid(eye_landmarks[1], eye_landmarks[5])
-        b = dist_euclid(eye_landmarks[2], eye_landmarks[4])
-        
-        # Göz yüksekliği (dikey mesafe)
-        c = dist_euclid(eye_landmarks[0], eye_landmarks[3])
-        
-        # EAR hesapla: ((p2-p6) + (p3-p5)) / (2 * (p1-p4))
-        if c > 0:
-            ear = (a + b) / (2.0 * c)
-        else:
-            ear = 0.0
-        
-        return ear
-    
-    def calculate_perclos(self) -> float:
-        """
-        PERCLOS (Percentage of Eye Closure) değerini hesaplar.
-        
-        PERCLOS, belirli bir süre içinde gözlerin kapalı olduğu zamanın yüzdesidir.
-        
-        Returns:
-            float: Hesaplanan PERCLOS değeri [0-1]
-        """
-        if not self.ear_values:
-            return 0.0
-        
-        # Eşik değerinin altında olan EAR değerlerini say (göz kapalı)
-        num_closed = sum(1 for ear in self.ear_values if ear < self.ear_threshold)
-        
-        # PERCLOS hesapla
-        perclos = num_closed / len(self.ear_values) if self.ear_values else 0.0
-        
-        return perclos
-    
-    def update(self, 
-              ear_left: Optional[float] = None, 
-              ear_right: Optional[float] = None) -> Dict:
-        """
-        Uykululuk durumunu günceller.
-        
-        Bu metod, göz verilerine dayanarak uykululuk seviyesini hesaplar.
-        
-        Args:
-            ear_left: Sol göz EAR değeri
-            ear_right: Sağ göz EAR değeri
-            
-        Returns:
-            Dict: Hesaplanan uykululuk durumu bilgilerini içeren sözlük
+            dict: Current drowsiness state
         """
         current_time = time.time()
-        time_diff = current_time - self.last_update_time
-        self.last_update_time = current_time
         
-        # Ortalama EAR hesapla
-        if ear_left is not None and ear_right is not None:
-            avg_ear = (ear_left + ear_right) / 2.0
-        elif ear_left is not None:
-            avg_ear = ear_left
-        elif ear_right is not None:
-            avg_ear = ear_right
-        else:
-            avg_ear = None
-        
-        # EAR ve PERCLOS güncelle
-        if avg_ear is not None:
-            self.ear_history.append(avg_ear)
-            self.ear_values.append(avg_ear)
-            self.perclos_value = self.calculate_perclos()
+        # Process EAR if provided
+        if ear_value is not None:
+            # Add to history
+            self.state.ear_values.append(ear_value)
             
-            # Göz kapalılık durumunu güncelle
-            currently_closed = avg_ear < self.ear_threshold
+            # Update closed eyes state
+            self._update_eye_closure_state(ear_value, current_time)
             
-            if currently_closed and not self.is_eyes_closed:
-                # Gözler yeni kapandı
-                self.is_eyes_closed = True
-                self.eyes_closed_start_time = current_time
-            elif not currently_closed and self.is_eyes_closed:
-                # Gözler açıldı
-                self.is_eyes_closed = False
-                self.eyes_closed_start_time = None
+            # Update PERCLOS
+            self._update_perclos(current_time)
+            
+            # Check if drowsy by EAR
+            self._update_ear_drowsiness(current_time)
+            
+            # Check if drowsy by PERCLOS
+            self._update_perclos_drowsiness()
+            
+            logger.debug(f"Updated drowsiness metrics: EAR={ear_value:.3f}, PERCLOS={self.state.perclos:.3f}, "
+                        f"Eyes closed duration={self.state.eyes_closed_duration:.2f}s")
         
-        # Göz kapalı kalma süresini hesapla
-        eyes_closed_duration = 0.0
-        if self.is_eyes_closed and self.eyes_closed_start_time is not None:
-            eyes_closed_duration = current_time - self.eyes_closed_start_time
+        # Process head pose if provided
+        if head_pose is not None:
+            roll, pitch, yaw = head_pose
+            self._update_head_pose_drowsiness(pitch, yaw)
+            logger.debug(f"Head pose: roll={roll:.1f}, pitch={pitch:.1f}, yaw={yaw:.1f}")
         
-        # Uykululuk seviyesini hesapla
-        # Sadece göz tabanlı faktörlerle 
-        drowsiness_score = 0.0
-        factor_count = 0
+        # Process gaze direction if provided
+        if gaze_direction is not None:
+            gaze_yaw, gaze_pitch = gaze_direction
+            self._update_gaze_drowsiness(gaze_pitch, gaze_yaw)
+            logger.debug(f"Gaze direction: yaw={gaze_yaw:.1f}, pitch={gaze_pitch:.1f}")
         
-        # PERCLOS faktörü (0-60 puan)
-        if self.perclos_value > 0:
-            perclos_score = min(60.0, (self.perclos_value / self.perclos_threshold) * 60.0)
-            drowsiness_score += perclos_score
-            factor_count += 1
+        # Calculate overall drowsiness level
+        drowsiness_level = self._calculate_drowsiness_level()
         
-        # Gözlerin kapalı kalma süresi faktörü (0-40 puan)
-        if eyes_closed_duration > 0:
-            closed_score = min(40.0, (eyes_closed_duration / self.ear_closed_duration) * 40.0)
-            drowsiness_score += closed_score
-            factor_count += 1
+        # Update alert status
+        self._update_alert_status(drowsiness_level, current_time)
         
-        # Toplam skoru normalize et (0-100 arasında)
-        if factor_count > 0:
-            normalized_score = drowsiness_score / factor_count * (100.0 / 60.0)  # 60: maksimum faktör puanı
-            self.drowsiness_level = min(100.0, normalized_score) / 100.0
-        else:
-            self.drowsiness_level = 0.0
+        # Log drowsiness state if alert is active
+        if self.state.alert_active:
+            logger.warning(f"DROWSINESS ALERT! Level: {drowsiness_level:.2f}, EAR: {ear_value:.2f}, "
+                          f"PERCLOS: {self.state.perclos:.2f}")
         
-        # Uykululuk durumunu belirle
-        if self.drowsiness_level < 0.3:
-            self.drowsiness_state = "Uyanık"
-        elif self.drowsiness_level < 0.6:
-            self.drowsiness_state = "Yorgun"
-        elif self.drowsiness_level < 0.8:
-            self.drowsiness_state = "Uykulu"
-        else:
-            self.drowsiness_state = "Tehlikeli"
-        
-        # Sonuçları içeren sözlüğü oluştur
-        result = {
-            "drowsiness_level": self.drowsiness_level,
-            "drowsiness_state": self.drowsiness_state,
-            "perclos": self.perclos_value,
-            "eyes_closed_duration": eyes_closed_duration,
-            "is_eyes_closed": self.is_eyes_closed,
-            "ear": avg_ear
+        # Return current state
+        return {
+            'drowsiness_level': drowsiness_level,
+            'ear_value': ear_value,
+            'perclos': self.state.perclos,
+            'eyes_closed_duration': self.state.eyes_closed_duration,
+            'alert_active': self.state.alert_active,
+            'is_drowsy_by_ear': self.state.is_drowsy_by_ear,
+            'is_drowsy_by_perclos': self.state.is_drowsy_by_perclos,
+            'is_drowsy_by_head_pose': self.state.is_drowsy_by_head_pose,
+            'is_drowsy_by_gaze': self.state.is_drowsy_by_gaze
         }
-        
-        return result
     
-    def compute_ear_from_landmarks(self, 
-                                  landmarks: List, 
-                                  left_eye_indices: List[int], 
-                                  right_eye_indices: List[int]) -> Tuple[float, float]:
+    def _update_eye_closure_state(self, ear_value: float, current_time: float):
         """
-        Yüz işaret noktalarından sol ve sağ göz EAR değerlerini hesaplar.
+        Update eye closure state based on current EAR value.
         
         Args:
-            landmarks: MediaPipe yüz işaret noktaları listesi
-            left_eye_indices: Sol göz işaret noktalarının indeksleri
-            right_eye_indices: Sağ göz işaret noktalarının indeksleri
+            ear_value: Current Eye Aspect Ratio value
+            current_time: Current timestamp
+        """
+        # Consider eyes closed if EAR is below threshold
+        is_eyes_closed_now = ear_value < self.ear_threshold
+        
+        # Track eyes closed duration
+        if is_eyes_closed_now:
+            if not self.state.is_eyes_closed:
+                # Eyes just closed
+                self.state.eyes_closed_start_time = current_time
+                logger.debug("Eyes closed detected")
+            
+            if self.state.eyes_closed_start_time is not None:
+                self.state.eyes_closed_duration = current_time - self.state.eyes_closed_start_time
+        else:
+            # Eyes are open
+            self.state.eyes_closed_start_time = None
+            self.state.eyes_closed_duration = 0.0
+            
+            if self.state.is_eyes_closed:
+                logger.debug("Eyes opened detected")
+        
+        self.state.is_eyes_closed = is_eyes_closed_now
+    
+    def _update_perclos(self, current_time: float):
+        """
+        Update PERCLOS (percentage of eye closure over time).
+        
+        Args:
+            current_time: Current timestamp
+        """
+        # Update closed/total time counters
+        time_step = 1.0 / 30.0  # Assume 30 FPS if not calculable
+        
+        # If multiple frames available in history, calculate actual time step
+        if len(self.state.ear_values) >= 2:
+            time_step = 1.0 / 30.0  # Default to 30 FPS
+        
+        if self.state.is_eyes_closed:
+            self.state.closed_time += time_step
+        
+        self.state.total_time += time_step
+        
+        # Calculate PERCLOS over the configured window
+        if self.state.total_time > self.perclos_window:
+            # Remove excess time from both counters
+            excess_time = self.state.total_time - self.perclos_window
+            self.state.total_time = self.perclos_window
+            
+            # Assume ratio of closed time in excess time is same as overall
+            closed_time_to_remove = (excess_time / self.state.total_time) * self.state.closed_time
+            self.state.closed_time = max(0, self.state.closed_time - closed_time_to_remove)
+        
+        # Calculate PERCLOS as percentage
+        if self.state.total_time > 0:
+            self.state.perclos = (self.state.closed_time / self.state.total_time) * 100.0
+    
+    def _update_ear_drowsiness(self, current_time: float):
+        """
+        Update drowsiness detection based on EAR values.
+        
+        Args:
+            current_time: Current timestamp
+        """
+        # Detect drowsiness based on eyes closed duration
+        if self.state.eyes_closed_duration >= self.ear_time_threshold:
+            if not self.state.is_drowsy_by_ear:
+                self.state.is_drowsy_by_ear = True
+                logger.warning(f"Drowsiness detected by EAR: {self.state.eyes_closed_duration:.2f}s eyes closed")
+        else:
+            self.state.is_drowsy_by_ear = False
+    
+    def _update_perclos_drowsiness(self):
+        """Update drowsiness detection based on PERCLOS value."""
+        previous_state = self.state.is_drowsy_by_perclos
+        
+        # Check if PERCLOS exceeds threshold
+        if self.state.perclos >= self.perclos_critical_threshold:
+            self.state.is_drowsy_by_perclos = True
+            if not previous_state:
+                logger.warning(f"Drowsiness detected by PERCLOS: {self.state.perclos:.2f}% > {self.perclos_critical_threshold}%")
+        elif self.state.perclos < self.perclos_warning_threshold:
+            self.state.is_drowsy_by_perclos = False
+            if previous_state:
+                logger.info(f"PERCLOS returned to normal: {self.state.perclos:.2f}%")
+    
+    def _update_head_pose_drowsiness(self, pitch: float, yaw: float):
+        """
+        Update drowsiness detection based on head pose.
+        
+        Args:
+            pitch: Head pitch angle in degrees
+            yaw: Head yaw angle in degrees
+        """
+        previous_state = self.state.is_drowsy_by_head_pose
+        
+        # Check for head nodding (looking down too much)
+        if pitch > self.head_pitch_threshold:
+            self.state.is_drowsy_by_head_pose = True
+            if not previous_state:
+                logger.warning(f"Drowsiness detected by head pose: pitch={pitch:.1f}° > {self.head_pitch_threshold}°")
+        else:
+            self.state.is_drowsy_by_head_pose = False
+    
+    def _update_gaze_drowsiness(self, gaze_pitch: float, gaze_yaw: float):
+        """
+        Update drowsiness detection based on gaze direction.
+        
+        Args:
+            gaze_pitch: Gaze pitch angle in degrees
+            gaze_yaw: Gaze yaw angle in degrees
+        """
+        previous_state = self.state.is_drowsy_by_gaze
+        
+        # Check for gaze indicating drowsiness (looking down too much)
+        if abs(gaze_pitch) > self.gaze_pitch_threshold or abs(gaze_yaw) > self.gaze_yaw_threshold:
+            self.state.is_drowsy_by_gaze = True
+            if not previous_state:
+                logger.warning(f"Drowsiness detected by gaze: pitch={gaze_pitch:.1f}°, yaw={gaze_yaw:.1f}°")
+        else:
+            self.state.is_drowsy_by_gaze = False
+    
+    def _calculate_drowsiness_level(self) -> float:
+        """
+        Calculate overall drowsiness level from various indicators.
+        
+        Returns:
+            float: Drowsiness level between 0.0 and 1.0
+        """
+        # Weights for each drowsiness factor
+        ear_weight = 0.4
+        perclos_weight = 0.4
+        head_pose_weight = 0.1
+        gaze_weight = 0.1
+        
+        # Calculate normalized PERCLOS factor (0.0 to 1.0)
+        perclos_factor = min(1.0, self.state.perclos / self.perclos_critical_threshold)
+        
+        # Calculate normalized EAR factor (0.0 to 1.0)
+        ear_factor = min(1.0, self.state.eyes_closed_duration / self.ear_time_threshold)
+        
+        # Calculate combined drowsiness level
+        drowsiness_level = (
+            ear_weight * ear_factor +
+            perclos_weight * perclos_factor +
+            head_pose_weight * (1.0 if self.state.is_drowsy_by_head_pose else 0.0) +
+            gaze_weight * (1.0 if self.state.is_drowsy_by_gaze else 0.0)
+        )
+        
+        return drowsiness_level
+    
+    def _update_alert_status(self, drowsiness_level: float, current_time: float):
+        """
+        Update drowsiness alert status.
+        
+        Args:
+            drowsiness_level: Current drowsiness level (0.0 to 1.0)
+            current_time: Current timestamp
+        """
+        # Drowsiness level threshold for alert
+        alert_threshold = 0.5
+        
+        previous_alert_state = self.state.alert_active
+        
+        # Activate alert if drowsiness level exceeds threshold
+        if drowsiness_level >= alert_threshold:
+            if not self.state.alert_active:
+                self.state.alert_active = True
+                self.state.alert_start_time = current_time
+                logger.warning(f"DROWSINESS ALERT ACTIVATED: Level={drowsiness_level:.2f}")
+        else:
+            # Check if alert cooldown has passed
+            if (self.state.alert_active and 
+                self.state.alert_start_time is not None and
+                current_time - self.state.alert_start_time > self.alert_cooldown):
+                self.state.alert_active = False
+                self.state.alert_start_time = None
+                logger.info(f"Drowsiness alert deactivated: Level={drowsiness_level:.2f}")
+    
+    def compute_ear_from_landmarks(self, left_eye_landmarks, right_eye_landmarks):
+        """
+        Compute EAR from eye landmarks.
+        
+        Args:
+            left_eye_landmarks: Left eye landmarks
+            right_eye_landmarks: Right eye landmarks
             
         Returns:
-            Tuple[float, float]: Sol ve sağ göz EAR değerleri
+            float: Average EAR value
         """
-        # Sol göz işaret noktalarını çıkar
-        left_eye_landmarks = []
-        for idx in left_eye_indices:
-            left_eye_landmarks.append([landmarks[idx][0], landmarks[idx][1]])
+        # Calculate EAR for each eye
+        left_ear = get_eye_aspect_ratio(left_eye_landmarks)
+        right_ear = get_eye_aspect_ratio(right_eye_landmarks)
         
-        # Sağ göz işaret noktalarını çıkar
-        right_eye_landmarks = []
-        for idx in right_eye_indices:
-            right_eye_landmarks.append([landmarks[idx][0], landmarks[idx][1]])
-        
-        # EAR değerlerini hesapla
-        left_ear = self.calculate_ear(left_eye_landmarks)
-        right_ear = self.calculate_ear(right_eye_landmarks)
-        
-        return left_ear, right_ear
+        # Return average EAR
+        return (left_ear + right_ear) / 2.0
     
+    def reset(self):
+        """Reset the detector state."""
+        self.state = DrowsinessState()
+        logger.info("DrowsinessDetector state reset")
+        
     def visualize(self, 
                  frame: np.ndarray, 
                  ear_left: Optional[float] = None,
                  ear_right: Optional[float] = None,
                  show_metrics: bool = True) -> np.ndarray:
         """
-        Uykululuk tespit sonuçlarını görselleştirir.
+        Visualize drowsiness detection results on the frame.
         
         Args:
-            frame: Giriş görüntüsü
-            ear_left: Sol göz EAR değeri
-            ear_right: Sağ göz EAR değeri
-            show_metrics: Metrik değerlerini göster
+            frame: Input image frame
+            ear_left: Left eye EAR value
+            ear_right: Right eye EAR value
+            show_metrics: Whether to show metrics on the frame
             
         Returns:
-            np.ndarray: Görselleştirilmiş görüntü
+            np.ndarray: Frame with visualized drowsiness detection
         """
+        # Get a copy of the frame
         vis_frame = frame.copy()
-        h, w, _ = vis_frame.shape
         
-        # Sadece tehlikeli durumlarda uyarı göster
-        if self.drowsiness_state == "Tehlikeli":
-            # Ekranda yanıp sönen çerçeve
-            flash_alpha = 0.5 * (np.sin(time.time() * 10) + 1)  # 0-1 arası değer
-            overlay = vis_frame.copy()
-            cv2.rectangle(overlay, (0, 0), (w, h), (0, 0, 255), -1)
-            cv2.addWeighted(overlay, flash_alpha * 0.3, vis_frame, 1 - flash_alpha * 0.3, 0, vis_frame)
+        if not show_metrics:
+            return vis_frame
+            
+        # Calculate average EAR
+        avg_ear = None
+        if ear_left is not None and ear_right is not None:
+            avg_ear = (ear_left + ear_right) / 2.0
+        elif ear_left is not None:
+            avg_ear = ear_left
+        elif ear_right is not None:
+            avg_ear = ear_right
+            
+        # Define font settings
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.7
+        thickness = 2
         
+        # Add EAR value
+        if avg_ear is not None:
+            ear_text = f"EAR: {avg_ear:.3f}"
+            color = (0, 255, 0)  # Green (normal)
+            if avg_ear < self.ear_threshold:
+                color = (0, 0, 255)  # Red (eyes closed)
+            cv2.putText(vis_frame, ear_text, (10, 30), font, font_scale, color, thickness)
+            
+        # Add PERCLOS value
+        perclos_text = f"PERCLOS: {self.state.perclos:.2f}%"
+        perclos_color = (0, 255, 0)  # Green (normal)
+        if self.state.perclos > self.perclos_critical_threshold:
+            perclos_color = (0, 0, 255)  # Red (critical)
+        elif self.state.perclos > self.perclos_warning_threshold:
+            perclos_color = (0, 165, 255)  # Orange (warning)
+        cv2.putText(vis_frame, perclos_text, (10, 60), font, font_scale, perclos_color, thickness)
+        
+        # Calculate drowsiness level
+        drowsiness_level = self._calculate_drowsiness_level()
+        
+        # Add drowsiness level
+        if drowsiness_level < 0.3:
+            drowsiness_state = "Alert"
+            drowsiness_color = (0, 255, 0)  # Green
+        elif drowsiness_level < 0.6:
+            drowsiness_state = "Tired"
+            drowsiness_color = (0, 165, 255)  # Orange
+        else:
+            drowsiness_state = "Drowsy"
+            drowsiness_color = (0, 0, 255)  # Red
+            
+        drowsiness_text = f"Drowsiness: {drowsiness_level:.2f} - {drowsiness_state}"
+        cv2.putText(vis_frame, drowsiness_text, (10, 90), font, font_scale, drowsiness_color, thickness)
+        
+        # Add eyes closed duration if eyes are closed
+        if self.state.is_eyes_closed and self.state.eyes_closed_start_time is not None:
+            closed_duration = time.time() - self.state.eyes_closed_start_time
+            if closed_duration > 1.0:  # Only show if closed for more than 1 second
+                closed_text = f"Eyes Closed: {closed_duration:.1f}s"
+                cv2.putText(vis_frame, closed_text, (10, 120), font, font_scale, (0, 0, 255), thickness)
+                
         return vis_frame 
