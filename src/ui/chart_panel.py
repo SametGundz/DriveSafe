@@ -201,63 +201,39 @@ class ChartPanel(QWidget):
         """)
     
     def update_chart_data(self, ear_value, mar_value, perclos_value, time_increment):
-        """Update the chart with new data points."""
-        # Increment time counter
+        """
+        Update the chart with new data points.
+        
+        Args:
+            ear_value: Current EAR value
+            mar_value: Current MAR value
+            perclos_value: Current PERCLOS value
+            time_increment: Time increment in seconds
+        """
+        # Update time counter
         self.time_counter += time_increment
         
-        # Add data points to series
+        # Add new data points
         self.ear_series.append(self.time_counter, ear_value)
         self.mar_series.append(self.time_counter, mar_value)
         self.perclos_series.append(self.time_counter, perclos_value)
         
-        # Remove old data points if we exceed the chart duration
-        history_duration = self.config['chart']['history_duration']
-        if self.time_counter > history_duration:
-            # Sliding window approach
-            cutoff_time = self.time_counter - history_duration
+        # Adjust X axis range if needed
+        if self.time_counter > self.time_axis.max():
+            self.time_axis.setRange(
+                self.time_counter - self.config['chart']['history_duration'],
+                self.time_counter
+            )
             
-            # Efficiently remove old points
-            while self.ear_series.count() > 0 and self.ear_series.at(0).x() < cutoff_time:
-                self.ear_series.remove(0)
-                
-            while self.mar_series.count() > 0 and self.mar_series.at(0).x() < cutoff_time:
-                self.mar_series.remove(0)
-                
-            while self.perclos_series.count() > 0 and self.perclos_series.at(0).x() < cutoff_time:
-                self.perclos_series.remove(0)
-                
-            # Smoothly update X axis range
-            current_min = self.time_axis.min()
-            current_max = self.time_axis.max()
-            
-            # Target range
-            target_min = self.time_counter - history_duration
-            target_max = self.time_counter
-            
-            # Smoother axis movement
-            damping_factor = 0.03
-            new_min = current_min + (target_min - current_min) * damping_factor
-            new_max = current_max + (target_max - current_max) * damping_factor
-            
-            # Update time axis
-            self.time_axis.setRange(new_min, new_max)
-            
-            # Performance optimization
-            max_points_per_series = 1000
-            if self.ear_series.count() > max_points_per_series:
-                i = 1
-                while i < self.ear_series.count():
-                    self.ear_series.remove(i)
-                    i += 1
-                    
-            if self.mar_series.count() > max_points_per_series:
-                i = 1
-                while i < self.mar_series.count():
-                    self.mar_series.remove(i)
-                    i += 1
-                    
-            if self.perclos_series.count() > max_points_per_series:
-                i = 1
-                while i < self.perclos_series.count():
-                    self.perclos_series.remove(i)
-                    i += 1 
+    def reset(self):
+        """Reset the chart, clearing all data series and resetting time counter."""
+        # Clear all series data
+        self.ear_series.clear()
+        self.mar_series.clear()
+        self.perclos_series.clear()
+        
+        # Reset time counter
+        self.time_counter = 0.0
+        
+        # Reset time axis
+        self.time_axis.setRange(0, self.config['chart']['history_duration']) 

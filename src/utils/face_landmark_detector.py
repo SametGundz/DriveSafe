@@ -14,7 +14,18 @@ This module provides the FaceLandmarkDetector class that handles:
 import cv2
 import numpy as np
 import mediapipe as mp
-from typing import List, Tuple, Dict, Optional, Union
+import logging
+from typing import List, Tuple, Dict, Optional, Union, Sequence
+
+# Import constants
+from src.utils.constants import (
+    LEFT_EYE_INDICES, RIGHT_EYE_INDICES,
+    OUTER_LIP_INDICES, INNER_LIP_INDICES, MOUTH_INDICES,
+    FACE_CONTOUR_INDICES, NOSE_INDICES
+)
+
+# Get module-specific logger
+logger = logging.getLogger(__name__)
 
 class FaceLandmarkDetector:
     """
@@ -23,26 +34,6 @@ class FaceLandmarkDetector:
     This class handles the detection of facial landmarks and provides
     methods to access specific groups of landmarks like eyes, mouth, etc.
     """
-    
-    # Key facial landmark indices
-    # Left eye landmarks
-    LEFT_EYE_INDICES = [362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387, 386, 385, 384, 398]
-    # Right eye landmarks
-    RIGHT_EYE_INDICES = [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246]
-    
-    # Mouth landmarks - with both outer and inner lip contours
-    # Outer lip landmarks clockwise from left corner
-    OUTER_LIP_INDICES = [61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291, 375, 321, 405, 314, 17, 84, 181, 91, 146]
-    # Inner lip landmarks clockwise from left corner
-    INNER_LIP_INDICES = [78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308, 324, 318, 402, 317, 14, 87, 178, 88, 95]
-    
-    # Combined mouth landmarks for visualization (outer + inner contour)
-    MOUTH_INDICES = OUTER_LIP_INDICES + INNER_LIP_INDICES
-    
-    # Face contour landmarks
-    FACE_CONTOUR_INDICES = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152]
-    # Nose landmarks
-    NOSE_INDICES = [168, 6, 197, 195, 5, 4, 19, 94, 2]
     
     def __init__(self, 
                 static_image_mode: bool = False, 
@@ -75,6 +66,9 @@ class FaceLandmarkDetector:
             min_detection_confidence=min_detection_confidence,
             min_tracking_confidence=min_tracking_confidence
         )
+        
+        logger.info(f"FaceLandmarkDetector initialized with settings: static_mode={static_image_mode}, "
+                  f"max_faces={max_num_faces}, min_detection_conf={min_detection_confidence}")
     
     def detect_face_landmarks(self, frame: np.ndarray) -> Tuple[List[List[float]], bool]:
         """
@@ -98,7 +92,7 @@ class FaceLandmarkDetector:
         results = self.face_mesh.process(rgb_frame)
         
         # Initialize empty list for landmarks
-        landmarks = []
+        landmarks: List[List[float]] = []
         face_detected = False
         
         # Extract landmarks if a face is detected
@@ -110,6 +104,10 @@ class FaceLandmarkDetector:
             for landmark in face_landmarks.landmark:
                 x, y, z = landmark.x * w, landmark.y * h, landmark.z
                 landmarks.append([x, y, z])
+            
+            logger.debug(f"Face detected with {len(landmarks)} landmarks")
+        else:
+            logger.debug("No face detected in frame")
         
         return landmarks, face_detected
     
@@ -125,6 +123,7 @@ class FaceLandmarkDetector:
             Tuple containing (x, y, width, height) of the face bounding rectangle
         """
         if not landmarks:
+            logger.warning("Attempted to get face rect but no landmarks provided")
             return (0, 0, 0, 0)
         
         # Extract x, y coordinates
@@ -148,6 +147,7 @@ class FaceLandmarkDetector:
         right = right + padding_x
         bottom = bottom + padding_y
         
+        logger.debug(f"Face rectangle calculated: x={left}, y={top}, width={right-left}, height={bottom-top}")
         return (left, top, right - left, bottom - top)
     
     def get_specific_landmarks(self, landmarks: List[List[float]], indices: List[int]) -> List[List[float]]:
@@ -162,10 +162,11 @@ class FaceLandmarkDetector:
             List of selected landmarks
         """
         if not landmarks:
+            logger.warning(f"Attempted to get specific landmarks {indices} but no landmarks provided")
             return []
         
         # Extract requested landmarks if available
-        selected_landmarks = []
+        selected_landmarks: List[List[float]] = []
         for idx in indices:
             if idx < len(landmarks):
                 selected_landmarks.append(landmarks[idx])
@@ -183,7 +184,10 @@ class FaceLandmarkDetector:
         Returns:
             List of eye landmarks
         """
-        indices = self.LEFT_EYE_INDICES if left_eye else self.RIGHT_EYE_INDICES
+        eye_type = "left" if left_eye else "right"
+        indices = LEFT_EYE_INDICES if left_eye else RIGHT_EYE_INDICES
+        
+        logger.debug(f"Getting {eye_type} eye landmarks")
         return self.get_specific_landmarks(landmarks, indices)
     
     def get_mouth_landmarks(self, landmarks: List[List[float]]) -> List[List[float]]:
@@ -196,7 +200,8 @@ class FaceLandmarkDetector:
         Returns:
             List of mouth landmarks
         """
-        return self.get_specific_landmarks(landmarks, self.MOUTH_INDICES)
+        logger.debug("Getting mouth landmarks")
+        return self.get_specific_landmarks(landmarks, MOUTH_INDICES)
     
     def get_outer_lip_landmarks(self, landmarks: List[List[float]]) -> List[List[float]]:
         """
@@ -208,7 +213,8 @@ class FaceLandmarkDetector:
         Returns:
             List of outer lip landmarks
         """
-        return self.get_specific_landmarks(landmarks, self.OUTER_LIP_INDICES)
+        logger.debug("Getting outer lip landmarks")
+        return self.get_specific_landmarks(landmarks, OUTER_LIP_INDICES)
     
     def get_inner_lip_landmarks(self, landmarks: List[List[float]]) -> List[List[float]]:
         """
@@ -220,7 +226,8 @@ class FaceLandmarkDetector:
         Returns:
             List of inner lip landmarks
         """
-        return self.get_specific_landmarks(landmarks, self.INNER_LIP_INDICES)
+        logger.debug("Getting inner lip landmarks")
+        return self.get_specific_landmarks(landmarks, INNER_LIP_INDICES)
     
     def draw_facial_landmarks(self, frame: np.ndarray, landmarks: List[List[float]], 
                            connections: Optional[List[Tuple[int, int]]] = None,
@@ -243,6 +250,10 @@ class FaceLandmarkDetector:
         Returns:
             np.ndarray: Frame with visualized landmarks
         """
+        if not landmarks:
+            logger.warning("Attempted to draw landmarks but no landmarks provided")
+            return frame.copy()
+        
         vis_frame = frame.copy()
         
         # Draw landmarks
@@ -258,19 +269,25 @@ class FaceLandmarkDetector:
                     end_point = (int(landmarks[end_idx][0]), int(landmarks[end_idx][1]))
                     cv2.line(vis_frame, start_point, end_point, connection_color, connection_thickness)
         
+        logger.debug(f"Drew {len(landmarks)} landmarks on frame")
         return vis_frame
     
-    def release(self):
+    def release(self) -> None:
         """Release MediaPipe resources."""
-        self.face_mesh.close()
+        try:
+            if hasattr(self, 'face_mesh') and self.face_mesh:
+                self.face_mesh.close()
+                logger.info("FaceLandmarkDetector resources released")
+        except Exception as e:
+            logger.error(f"Error releasing FaceLandmarkDetector resources: {str(e)}")
 
 
-# Convenience function to get a preconfigured FaceLandmarkDetector instance
 def get_face_landmark_detector() -> FaceLandmarkDetector:
     """
-    Factory function to create and return a FaceLandmarkDetector instance.
+    Get a new instance of FaceLandmarkDetector.
     
     Returns:
-        FaceLandmarkDetector: Initialized FaceLandmarkDetector instance
+        FaceLandmarkDetector: A new detector instance
     """
+    logger.debug("Creating new FaceLandmarkDetector instance")
     return FaceLandmarkDetector() 
