@@ -14,8 +14,13 @@ This module provides the GazeDetector class that handles:
 import os
 import cv2
 import numpy as np
-import onnxruntime
-from typing import List, Tuple, Optional, Union
+import logging
+import time
+from typing import List, Tuple, Optional, Union, Dict, Any
+
+# Logger oluşturma
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger("GazeDetector")
 
 class GazeDetector:
     """
@@ -36,39 +41,172 @@ class GazeDetector:
         [34.04, 39.55, 57.49],   # Left eye outer corner
         [0.0, 0.0, 8.0],         # Nose tip
         [0.0, -48.0, 21.0],      # Chin tip
-    ])
+    ], dtype=np.float32)
     
     # MediaPipe landmark indices for the 6 points used in ETH-XGaze
     # Right eye outer corner, Right eye inner corner, Left eye inner corner, Left eye outer corner, Nose tip, Chin tip
     GAZE_LANDMARK_INDICES = [33, 133, 362, 263, 1, 199]
     
-    def __init__(self, model_path: str = None):
+    # Göz landmark indeksleri
+    LEFT_IRIS_CENTER_IDX = 468  # Sol iris merkezi
+    RIGHT_IRIS_CENTER_IDX = 473  # Sağ iris merkezi
+    LEFT_EYE_OUTER_IDX = 263  # Sol göz dış köşesi
+    LEFT_EYE_INNER_IDX = 362  # Sol göz iç köşesi
+    RIGHT_EYE_OUTER_IDX = 33  # Sağ göz dış köşesi
+    RIGHT_EYE_INNER_IDX = 133  # Sağ göz iç köşesi
+    
+    # Göz üst ve alt landmark indeksleri
+    LEFT_EYE_TOP_IDX = 386  # Sol göz üst noktası
+    LEFT_EYE_BOTTOM_IDX = 374  # Sol göz alt noktası 
+    RIGHT_EYE_TOP_IDX = 159  # Sağ göz üst noktası
+    RIGHT_EYE_BOTTOM_IDX = 145  # Sağ göz alt noktası
+    
+    def __init__(self, model_path: str = None, use_model_loader: bool = True):
         """
         Initialize the GazeDetector.
         
         Args:
             model_path: Path to the ONNX model file (if None, uses default path)
+            use_model_loader: Whether to use the ModelLoader class (recommended)
         """
+        start_time = time.time()
+        
         # Initialize variables for frame skipping optimization
         self._last_gaze_vector = None
         self._last_normalized_image = None
         self._frame_counter = 0
         
+        # Kamera parametreleri ve dönüşüm matrisleri önbelleği
+        self._camera_matrix_cache = {}
+        self._transform_matrix_cache = {}
+        
+        # Önişleme ve normalizasyon için bellek önbelleği
+        self._rgb_buffer = None
+        self._resized_buffer = None
+        
+        # ONNX model parametreleri
+        self.input_name = None
+        self.output_name = None
+        self.onnx_session = None
+        
         # Try to load the ONNX model
-        if model_path is None:
-            self.model_path = os.path.join('models', 'eth_xgaze_model.onnx')
+        self.model_path = self._find_model_path(model_path)
+        
+        if use_model_loader:
+            self._load_model_with_loader()
         else:
-            self.model_path = model_path
+            self._load_model_directly()
+        
+        logger.info(f"GazeDetector initialized in {time.time() - start_time:.2f}s")
+    
+    def _find_model_path(self, model_path: str = None) -> str:
+        """
+        Find the correct model path by checking multiple possible locations.
+        
+        Args:
+            model_path: User-provided model path
             
+        Returns:
+            str: Path to the model file
+        """
+        # Check user-provided path first
+        if model_path and os.path.exists(model_path):
+            return model_path
+        
+        # List of possible paths to search
+        possible_paths = [
+            # User-provided path
+            model_path,
+            
+            # Default paths
+            os.path.join('models', 'eth_xgaze_model.onnx'),
+            os.path.join('models', 'eth_xgaze.onnx'),
+            
+            # Common locations
+            os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models', 'eth_xgaze_model.onnx'),
+            os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models', 'eth_xgaze.onnx'),
+            
+            # More relative paths
+            os.path.join('..', 'models', 'eth_xgaze_model.onnx'),
+            os.path.join('..', 'models', 'eth_xgaze.onnx')
+        ]
+        
+        # Check each path
+        for path in possible_paths:
+            if path and os.path.exists(path):
+                return path
+        
+        # If no path is found, return the default path (will log a warning later)
+        return os.path.join('models', 'eth_xgaze_model.onnx')
+    
+    def _load_model_with_loader(self):
+        """Load model using the ModelLoader class."""
+        try:
+            # İlk olarak ModelLoader'ı dinamik olarak import etmeyi dene
+            from src.utils.model_loader import get_model_loader
+            
+            loader = get_model_loader()
+            model = loader.load_eth_xgaze_model()
+            
+            if model is not None:
+                if hasattr(model, 'session'):  # ONNXGazeModel durumu
+                    self.onnx_session = model.session
+                    self.input_name = model.input_name
+                    self.output_name = model.output_name
+                    logger.info(f"Model loaded using ModelLoader: {self.model_path}")
+                else:
+                    # PyTorch modeli - önce ONNX'e dönüştürmeyi dene
+                    logger.warning("ModelLoader returned a PyTorch model, not ONNX. Using direct loading instead.")
+                    self._load_model_directly()
+            else:
+                logger.warning("ModelLoader failed to load model. Using direct loading instead.")
+                self._load_model_directly()
+                
+        except ImportError:
+            logger.warning("ModelLoader not found. Using direct loading instead.")
+            self._load_model_directly()
+        except Exception as e:
+            logger.error(f"Error using ModelLoader: {str(e)}. Using direct loading instead.")
+            self._load_model_directly()
+    
+    def _load_model_directly(self):
+        """Load ONNX model directly using onnxruntime."""
         if os.path.exists(self.model_path):
             try:
-                self.onnx_session = onnxruntime.InferenceSession(self.model_path)
-                print(f"ONNX model loaded: {self.model_path}")
+                import onnxruntime as ort
+                
+                # ONNX Runtime optimizasyonları
+                sess_options = ort.SessionOptions()
+                sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+                sess_options.enable_cpu_mem_arena = True
+                sess_options.enable_mem_pattern = True
+                
+                # CPU optimizasyonları
+                sess_options.intra_op_num_threads = min(8, os.cpu_count() or 4)
+                sess_options.inter_op_num_threads = min(2, os.cpu_count() or 1)
+                
+                # Providers seçimi
+                providers = ['CPUExecutionProvider']
+                
+                # GPU kullanımını kontrol et
+                if 'CUDAExecutionProvider' in ort.get_available_providers():
+                    providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+                
+                self.onnx_session = ort.InferenceSession(self.model_path, sess_options, providers=providers)
+                self.input_name = self.onnx_session.get_inputs()[0].name
+                self.output_name = self.onnx_session.get_outputs()[0].name
+                
+                logger.info(f"ONNX model loaded directly: {self.model_path}")
+                logger.info(f"Input name: {self.input_name}, Output name: {self.output_name}")
+                
+            except ImportError:
+                logger.error("Failed to import onnxruntime. Please install it: pip install onnxruntime")
+                self.onnx_session = None
             except Exception as e:
-                print(f"Failed to load ONNX model: {str(e)}")
+                logger.error(f"Failed to load ONNX model: {str(e)}")
                 self.onnx_session = None
         else:
-            print(f"WARNING: ONNX model not found: {self.model_path}")
+            logger.warning(f"ONNX model not found: {self.model_path}")
             self.onnx_session = None
     
     def get_eye_gaze_direction(self, landmarks: List[List[float]]) -> Tuple[float, float, float]:
@@ -90,62 +228,60 @@ class GazeDetector:
         if landmarks is None or not landmarks:
             return (0.0, 0.0, 0.0)
             
-        # Get iris landmarks - MediaPipe provides iris landmarks indices
-        # For left eye: 468, 469, 470, 471, 472
-        # For right eye: 473, 474, 475, 476, 477
-        left_iris_center_idx = 468  # Center of left iris
-        right_iris_center_idx = 473  # Center of right iris
+        # Landmark indekslerinin sınırlar içinde olup olmadığını kontrol et
+        max_landmark_idx = max(
+            self.LEFT_IRIS_CENTER_IDX, self.RIGHT_IRIS_CENTER_IDX,
+            self.LEFT_EYE_OUTER_IDX, self.LEFT_EYE_INNER_IDX,
+            self.RIGHT_EYE_OUTER_IDX, self.RIGHT_EYE_INNER_IDX,
+            self.LEFT_EYE_TOP_IDX, self.LEFT_EYE_BOTTOM_IDX,
+            self.RIGHT_EYE_TOP_IDX, self.RIGHT_EYE_BOTTOM_IDX
+        )
         
-        # Get eye corner landmarks
-        left_eye_corners = [landmarks[362], landmarks[263]]  # Outer and inner corners of left eye
-        right_eye_corners = [landmarks[33], landmarks[133]]  # Outer and inner corners of right eye
-        
-        # Check if we have all the necessary landmarks
-        if (len(landmarks) <= max(left_iris_center_idx, right_iris_center_idx) or
-            not all(left_eye_corners) or not all(right_eye_corners)):
+        if len(landmarks) <= max_landmark_idx:
             return (0.0, 0.0, 0.0)
             
-        # Get iris centers
-        left_iris_center = landmarks[left_iris_center_idx]
-        right_iris_center = landmarks[right_iris_center_idx]
+        # NumPy ile hızlandırma
+        # Göz köşeleri
+        left_eye_corners = np.array([landmarks[self.LEFT_EYE_OUTER_IDX][:2], landmarks[self.LEFT_EYE_INNER_IDX][:2]])
+        right_eye_corners = np.array([landmarks[self.RIGHT_EYE_OUTER_IDX][:2], landmarks[self.RIGHT_EYE_INNER_IDX][:2]])
         
-        # Calculate horizontal gaze direction by comparing iris position to eye width
-        # For left eye
-        left_eye_width = self._calculate_distance(left_eye_corners[0], left_eye_corners[1])
-        left_iris_to_corner = self._calculate_distance(left_iris_center, left_eye_corners[0])
-        left_gaze_x = 2.0 * (left_iris_to_corner / left_eye_width) - 1.0
+        # İris merkezleri
+        left_iris_center = np.array(landmarks[self.LEFT_IRIS_CENTER_IDX][:2])
+        right_iris_center = np.array(landmarks[self.RIGHT_IRIS_CENTER_IDX][:2])
         
-        # For right eye
-        right_eye_width = self._calculate_distance(right_eye_corners[0], right_eye_corners[1])
-        right_iris_to_corner = self._calculate_distance(right_iris_center, right_eye_corners[0])
-        right_gaze_x = 1.0 - 2.0 * (right_iris_to_corner / right_eye_width)
+        # Yatay bakış hesaplama
+        # Sol göz
+        left_eye_width = np.linalg.norm(left_eye_corners[0] - left_eye_corners[1])
+        left_iris_to_corner = np.linalg.norm(left_iris_center - left_eye_corners[0])
+        left_gaze_x = 2.0 * (left_iris_to_corner / max(left_eye_width, 1e-6)) - 1.0
         
-        # Average the horizontal gaze from both eyes
+        # Sağ göz
+        right_eye_width = np.linalg.norm(right_eye_corners[0] - right_eye_corners[1])
+        right_iris_to_corner = np.linalg.norm(right_iris_center - right_eye_corners[0])
+        right_gaze_x = 1.0 - 2.0 * (right_iris_to_corner / max(right_eye_width, 1e-6))
+        
+        # Her iki gözün yatay bakışının ortalaması
         gaze_x = (left_gaze_x + right_gaze_x) / 2.0
         
-        # Calculate vertical gaze direction
-        # Get top and bottom landmarks of each eye
-        left_eye_top_idx, left_eye_bottom_idx = 386, 374
-        right_eye_top_idx, right_eye_bottom_idx = 159, 145
+        # Dikey bakış hesaplama
+        # Sol göz
+        left_eye_top = np.array(landmarks[self.LEFT_EYE_TOP_IDX][:2])
+        left_eye_bottom = np.array(landmarks[self.LEFT_EYE_BOTTOM_IDX][:2])
+        left_eye_height = np.linalg.norm(left_eye_top - left_eye_bottom)
+        left_iris_to_top = np.linalg.norm(left_iris_center - left_eye_top)
+        left_gaze_y = 2.0 * (left_iris_to_top / max(left_eye_height, 1e-6)) - 1.0
         
-        if (len(landmarks) <= max(left_eye_top_idx, left_eye_bottom_idx, right_eye_top_idx, right_eye_bottom_idx)):
-            gaze_y = 0.0
-        else:
-            # For left eye
-            left_eye_height = self._calculate_distance(landmarks[left_eye_top_idx], landmarks[left_eye_bottom_idx])
-            left_iris_to_top = self._calculate_distance(left_iris_center, landmarks[left_eye_top_idx])
-            left_gaze_y = 2.0 * (left_iris_to_top / left_eye_height) - 1.0
-            
-            # For right eye
-            right_eye_height = self._calculate_distance(landmarks[right_eye_top_idx], landmarks[right_eye_bottom_idx])
-            right_iris_to_top = self._calculate_distance(right_iris_center, landmarks[right_eye_top_idx])
-            right_gaze_y = 2.0 * (right_iris_to_top / right_eye_height) - 1.0
-            
-            # Average the vertical gaze from both eyes
-            gaze_y = (left_gaze_y + right_gaze_y) / 2.0
+        # Sağ göz
+        right_eye_top = np.array(landmarks[self.RIGHT_EYE_TOP_IDX][:2])
+        right_eye_bottom = np.array(landmarks[self.RIGHT_EYE_BOTTOM_IDX][:2])
+        right_eye_height = np.linalg.norm(right_eye_top - right_eye_bottom)
+        right_iris_to_top = np.linalg.norm(right_iris_center - right_eye_top)
+        right_gaze_y = 2.0 * (right_iris_to_top / max(right_eye_height, 1e-6)) - 1.0
         
-        # Estimate z-component (depth/focus)
-        # More negative when looking sideways, more positive when looking forward
+        # Her iki gözün dikey bakışının ortalaması
+        gaze_y = (left_gaze_y + right_gaze_y) / 2.0
+        
+        # Derinlik bileşeni (z) - yanlara/yukarı-aşağı bakma miktarı azaldıkça daha odaklı
         gaze_z = 1.0 - (abs(gaze_x) + abs(gaze_y)) / 2.0
         
         return (gaze_x, gaze_y, gaze_z)
@@ -162,118 +298,84 @@ class GazeDetector:
         Returns:
             float: Euclidean distance between points
         """
-        return np.sqrt((point1[0] - point2[0])**2 + (point1[1] - point2[1])**2)
+        # NumPy ile daha hızlı hesaplama
+        return np.linalg.norm(np.array(point1[:2]) - np.array(point2[:2]))
     
-    def draw_gaze_direction(self, frame: np.ndarray, landmarks: List[List[float]], 
-                           gaze_dir: Tuple[float, float, float],
-                           arrow_color: Tuple[int, int, int] = (0, 0, 255),
-                           arrow_length: int = 100,
-                           arrow_thickness: int = 2) -> np.ndarray:
+    def draw_gaze(self, image: np.ndarray, pitchyaw: np.ndarray, origin: Tuple[int, int], 
+                length: int = 50, thickness: int = 2, color: Tuple[int, int, int] = (0, 0, 255),
+                overlay: bool = True) -> np.ndarray:
         """
-        Draw gaze direction arrow on the frame.
+        Visualize gaze direction.
+        
+        Args:
+            image: Input image
+            pitchyaw: Gaze direction vector (pitch, yaw)
+            origin: Origin point (x, y) of gaze vector
+            length: Arrow length
+            thickness: Arrow thickness
+            color: Arrow color
+            overlay: If True, draw on a copy of the image, else modify the original
+            
+        Returns:
+            image: Image with gaze direction visualized
+        """
+        # Kopyalama veya doğrudan değiştirme
+        vis_image = image.copy() if overlay else image
+        
+        try:
+            pitch, yaw = pitchyaw
+            
+            # Bakış vektörü hesapla
+            x = -length * np.sin(yaw) * np.cos(pitch)
+            y = -length * np.sin(pitch)
+            
+            # 2D noktaya projeksiyon
+            point_2d = (int(origin[0] + x), int(origin[1] + y))
+            
+            # Ok çiz
+            cv2.arrowedLine(vis_image, origin, point_2d, color, thickness, cv2.LINE_AA, tipLength=0.2)
+            
+            # İsteğe bağlı: Açıları metin olarak göster
+            # cv2.putText(vis_image, f"P:{np.rad2deg(pitch):.1f} Y:{np.rad2deg(yaw):.1f}", 
+            #           (origin[0]-30, origin[1]-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+            
+            return vis_image
+            
+        except Exception as e:
+            logger.warning(f"Error drawing gaze: {str(e)}")
+            return vis_image
+    
+    def get_camera_matrix(self, frame: np.ndarray) -> np.ndarray:
+        """
+        Get camera matrix for the input frame.
         
         Args:
             frame: Input frame
-            landmarks: List of facial landmarks
-            gaze_dir: Tuple of (x, y, z) gaze direction vector
-            arrow_color: Color for the arrow (BGR)
-            arrow_length: Length of the arrow
-            arrow_thickness: Thickness of the arrow
             
         Returns:
-            np.ndarray: Frame with visualized gaze direction
+            np.ndarray: Camera matrix
         """
-        if landmarks is None or not landmarks or len(landmarks) < 470:
-            return frame
-            
-        vis_frame = frame.copy()
+        # Frame boyutları
+        h, w = frame.shape[:2]
         
-        # Get iris centers
-        left_iris_idx = 468  # Center of left iris
-        right_iris_idx = 473  # Center of right iris
+        # Önbellekte var mı kontrol et
+        cache_key = f"{w}x{h}"
+        if cache_key in self._camera_matrix_cache:
+            return self._camera_matrix_cache[cache_key]
         
-        # Get eye corners
-        left_eye_corners = [landmarks[362], landmarks[263]]  # Outer and inner corners of left eye
-        right_eye_corners = [landmarks[33], landmarks[133]]  # Outer and inner corners of right eye
-        
-        # Calculate eye centers
-        left_eye_center = (int(landmarks[left_iris_idx][0]), int(landmarks[left_iris_idx][1]))
-        right_eye_center = (int(landmarks[right_iris_idx][0]), int(landmarks[right_iris_idx][1]))
-        
-        # Convert gaze_dir (x,y,z) to angles
-        # gaze_x: -1.0 (far left) to 1.0 (far right)
-        # gaze_y: -1.0 (far up) to 1.0 (far down)
-        gaze_x, gaze_y, gaze_z = gaze_dir
-        
-        # Convert these normalized directions to angles (in radians)
-        # Yaw angle (horizontal rotation, left-right)
-        yaw = np.arcsin(np.clip(gaze_x, -1.0, 1.0))
-        # Pitch angle (vertical rotation, up-down)
-        pitch = np.arcsin(np.clip(gaze_y, -1.0, 1.0))
-        
-        # Draw gaze direction for each eye
-        for eye_center in [left_eye_center, right_eye_center]:
-            # Calculate gaze vector endpoint using angles
-            x = -arrow_length * np.sin(yaw) * np.cos(pitch)
-            y = -arrow_length * np.sin(pitch)
-            z = -arrow_length * np.cos(yaw) * np.cos(pitch)
-            
-            # Convert 3D coordinates to 2D screen coordinates
-            # Simple projection since we don't have camera parameters
-            scale_factor = 0.5  # Scale to make the arrow more visible
-            dx = scale_factor * x
-            dy = scale_factor * y
-            
-            # Adjust length based on gaze_z (confidence/focus)
-            length_adjustment = 0.5 + gaze_z / 2.0  # Maps 0-1 to 0.5-1.0
-            dx *= length_adjustment
-            dy *= length_adjustment
-            
-            # Calculate endpoint
-            gaze_end = (int(eye_center[0] + dx), int(eye_center[1] + dy))
-            
-            # Draw arrow
-            cv2.arrowedLine(
-                vis_frame,
-                eye_center,
-                gaze_end,
-                arrow_color,
-                arrow_thickness,
-                cv2.LINE_AA,
-                tipLength=0.2
-            )
-            
-        # Add a visual center point between eyes for the general gaze direction
-        center_point = ((left_eye_center[0] + right_eye_center[0]) // 2, 
-                        (left_eye_center[1] + right_eye_center[1]) // 2)
-        
-        # Calculate endpoint for the central gaze direction
-        x = -arrow_length * 1.5 * np.sin(yaw) * np.cos(pitch)
-        y = -arrow_length * 1.5 * np.sin(pitch)
-        scale_factor = 0.5
-        dx = scale_factor * x
-        dy = scale_factor * y
-        
-        # Adjust length based on gaze_z (confidence/focus)
-        length_adjustment = 0.5 + gaze_z / 2.0
-        dx *= length_adjustment
-        dy *= length_adjustment
-        
-        # Calculate endpoint
-        gaze_end = (int(center_point[0] + dx), int(center_point[1] + dy))
-        
-        # Draw central arrow
-        cv2.arrowedLine(
-            vis_frame,
-            center_point,
-            gaze_end,
-            (0, 165, 255),  # Orange color for the central arrow
-            arrow_thickness + 1,
-            cv2.LINE_AA,
-            tipLength=0.2
+        # Yoksa oluştur
+        focal_length = w
+        center = (w / 2, h / 2)
+        camera_matrix = np.array(
+            [[focal_length, 0, center[0]],
+             [0, focal_length, center[1]],
+             [0, 0, 1]], dtype=np.float64
         )
         
-        return vis_frame
+        # Önbelleğe ekle
+        self._camera_matrix_cache[cache_key] = camera_matrix
+        
+        return camera_matrix
     
     def estimate_head_pose(self, landmarks: List[List[float]], frame: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -286,52 +388,56 @@ class GazeDetector:
         Returns:
             rvec, tvec: Rotation and translation vectors
         """
-        # Calculate camera matrix from frame dimensions
-        h, w = frame.shape[:2]
-        focal_length = w
-        center = (w / 2, h / 2)
-        camera_matrix = np.array(
-            [[focal_length, 0, center[0]],
-             [0, focal_length, center[1]],
-             [0, 0, 1]], dtype=np.float64
-        )
+        if not landmarks or len(landmarks) < max(self.GAZE_LANDMARK_INDICES):
+            return np.zeros((3, 1), dtype=np.float64), np.zeros((3, 1), dtype=np.float64)
+        
+        # Get camera matrix
+        camera_matrix = self.get_camera_matrix(frame)
         distortion = np.zeros((4, 1), dtype=np.float64)
         
         # Get the 6 points used for gaze estimation
-        landmarks_2d = []
-        for idx in self.GAZE_LANDMARK_INDICES:
+        landmarks_2d = np.zeros((6, 2), dtype=np.float64)
+        
+        valid_points = True
+        for i, idx in enumerate(self.GAZE_LANDMARK_INDICES):
             if idx < len(landmarks):
-                landmarks_2d.append([landmarks[idx][0], landmarks[idx][1]])
+                landmarks_2d[i] = [landmarks[idx][0], landmarks[idx][1]]
+            else:
+                valid_points = False
+                break
         
-        landmarks_2d = np.array(landmarks_2d, dtype=np.float64)
+        # Solve PnP to get head pose if all points are valid
+        if valid_points:
+            try:
+                # Initial estimate with EPNP (hızlı)
+                ret, rvec, tvec = cv2.solvePnP(
+                    self.GAZE_FACE_MODEL, 
+                    landmarks_2d, 
+                    camera_matrix, 
+                    distortion, 
+                    flags=cv2.SOLVEPNP_EPNP
+                )
+                
+                # Refine with Levenberg-Marquardt (daha doğru)
+                ret, rvec, tvec = cv2.solvePnP(
+                    self.GAZE_FACE_MODEL, 
+                    landmarks_2d, 
+                    camera_matrix, 
+                    distortion, 
+                    rvec, tvec, 
+                    True,
+                    flags=cv2.SOLVEPNP_ITERATIVE
+                )
+                
+                return rvec, tvec
+            except cv2.error as e:
+                logger.error(f"CV2 error in solvePnP: {str(e)}")
         
-        # Solve PnP to get head pose
-        if len(landmarks_2d) == 6:  # All points are found
-            # Initial estimate
-            ret, rvec, tvec = cv2.solvePnP(
-                self.GAZE_FACE_MODEL, 
-                landmarks_2d, 
-                camera_matrix, 
-                distortion, 
-                flags=cv2.SOLVEPNP_EPNP
-            )
-            
-            # Refine estimate
-            ret, rvec, tvec = cv2.solvePnP(
-                self.GAZE_FACE_MODEL, 
-                landmarks_2d, 
-                camera_matrix, 
-                distortion, 
-                rvec, tvec, 
-                True
-            )
-            
-            return rvec, tvec
-        
-        # Not enough points
+        # Failed to estimate pose
         return np.zeros((3, 1), dtype=np.float64), np.zeros((3, 1), dtype=np.float64)
     
-    def normalize_face(self, img: np.ndarray, landmarks: List[List[float]], frame: np.ndarray) -> np.ndarray:
+    def normalize_face(self, img: np.ndarray, landmarks: List[List[float]], frame: np.ndarray,
+                     target_size: Tuple[int, int] = (224, 224)) -> np.ndarray:
         """
         Normalize face image for ETH-XGaze model.
         
@@ -339,138 +445,171 @@ class GazeDetector:
             img: Input frame
             landmarks: List of facial landmarks
             frame: Input frame for calculating image dimensions
+            target_size: Size of the normalized image
             
         Returns:
             img_normalized: Normalized face image
         """
-        # Estimate head pose
-        hr, ht = self.estimate_head_pose(landmarks, frame)
+        if not landmarks or len(landmarks) < max(self.GAZE_LANDMARK_INDICES):
+            # Normalizasyon yapılamıyorsa boş bir görüntü döndür
+            return np.zeros((target_size[1], target_size[0], 3), dtype=np.uint8)
         
-        # Calculate camera matrix from frame dimensions
-        h, w = frame.shape[:2]
-        focal_length = w
-        center = (w / 2, h / 2)
-        camera_matrix = np.array(
-            [[focal_length, 0, center[0]],
-             [0, focal_length, center[1]],
-             [0, 0, 1]], dtype=np.float64
-        )
-        
-        # Normalized camera parameters (from ETH-XGaze)
-        focal_norm = 960  # Normalized focal length
-        distance_norm = 600  # Normalized distance between eye and camera
-        roi_size = (224, 224)  # Cropped eye image size
-        
-        # Calculate 3D positions of landmarks
-        ht = ht.reshape((3, 1))
-        hR = cv2.Rodrigues(hr)[0]  # Rotation matrix
-        Fc = np.dot(hR, self.GAZE_FACE_MODEL.T) + ht  # Rotate and translate face model
-        
-        # Find face center
-        two_eye_center = np.mean(Fc[:, 0:4], axis=1).reshape((3, 1))
-        nose_center = np.mean(Fc[:, 4:6], axis=1).reshape((3, 1))
-        face_center = np.mean(np.concatenate((two_eye_center, nose_center), axis=1), axis=1).reshape((3, 1))
-        
-        # Normalize image
-        distance = np.linalg.norm(face_center)  # Actual distance between eye and camera
-        
-        z_scale = distance_norm / distance
-        cam_norm = np.array([  # Virtual camera intrinsics
-            [focal_norm, 0, roi_size[0] / 2],
-            [0, focal_norm, roi_size[1] / 2],
-            [0, 0, 1.0],
-        ])
-        
-        # Calculate transformation matrix
-        S = np.array([  # Scaling matrix
-            [1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [0.0, 0.0, z_scale],
-        ])
-        
-        hRx = hR[:, 0]
-        forward = (face_center / distance).reshape(3)
-        down = np.cross(forward, hRx)
-        down /= np.linalg.norm(down)
-        right = np.cross(down, forward)
-        right /= np.linalg.norm(right)
-        
-        R = np.c_[right, down, forward].T  # Rotation matrix
-        
-        # Calculate transformation matrix for normalized image
-        W = np.dot(np.dot(cam_norm, S), np.dot(R, np.linalg.inv(camera_matrix)))
-        
-        # Transform image
-        img_normalized = cv2.warpPerspective(img, W, roi_size)
-        
-        return img_normalized
+        try:
+            # Baş duruşunu tahmin et
+            hr, ht = self.estimate_head_pose(landmarks, frame)
+            
+            # Kamera matrisini al
+            camera_matrix = self.get_camera_matrix(frame)
+            
+            # ETH-XGaze normalizasyon parametreleri
+            focal_norm = 960  # Normalize edilmiş odak uzaklığı
+            distance_norm = 600  # Normalize edilmiş göz-kamera mesafesi
+            
+            # 3D landmark konumlarını hesapla
+            ht = ht.reshape((3, 1))
+            hR = cv2.Rodrigues(hr)[0]  # Rotasyon matrisi
+            
+            # Yüz modelini döndür ve öteleme uygula
+            Fc = np.dot(hR, self.GAZE_FACE_MODEL.T) + ht
+            
+            # Yüz merkezi bul
+            two_eye_center = np.mean(Fc[:, 0:4], axis=1).reshape((3, 1))
+            nose_center = np.mean(Fc[:, 4:6], axis=1).reshape((3, 1))
+            face_center = np.mean(np.concatenate((two_eye_center, nose_center), axis=1), axis=1).reshape((3, 1))
+            
+            # Normalizasyon
+            distance = np.linalg.norm(face_center)  # Göz-kamera mesafesi
+            
+            # Z ekseninde ölçekleme
+            z_scale = distance_norm / max(distance, 1e-6)
+            
+            # Sanal kamera içsel parametreleri
+            cam_norm = np.array([
+                [focal_norm, 0, target_size[0] / 2],
+                [0, focal_norm, target_size[1] / 2],
+                [0, 0, 1.0],
+            ])
+            
+            # Dönüşüm matrisi hesapla
+            # Ölçekleme matrisi
+            S = np.array([
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, z_scale],
+            ])
+            
+            # Rotasyon hesapla
+            hRx = hR[:, 0]
+            forward = (face_center / max(distance, 1e-6)).reshape(3)
+            down = np.cross(forward, hRx)
+            down = down / max(np.linalg.norm(down), 1e-6)
+            right = np.cross(down, forward)
+            right = right / max(np.linalg.norm(right), 1e-6)
+            
+            R = np.c_[right, down, forward].T  # Rotasyon matrisi
+            
+            # Son dönüşüm matrisi
+            W = np.dot(np.dot(cam_norm, S), np.dot(R, np.linalg.inv(camera_matrix)))
+            
+            # Görüntüyü dönüştür
+            img_normalized = cv2.warpPerspective(img, W, target_size)
+            
+            return img_normalized
+            
+        except Exception as e:
+            logger.error(f"Error normalizing face: {str(e)}")
+            return np.zeros((target_size[1], target_size[0], 3), dtype=np.uint8)
     
-    def preprocess_image(self, image: np.ndarray) -> np.ndarray:
+    def preprocess_image(self, image: np.ndarray, target_size: Tuple[int, int] = (224, 224)) -> np.ndarray:
         """
         Preprocess image for ETH-XGaze model.
         
         Args:
-            image: Normalized face image (224x224)
+            image: Normalized face image
+            target_size: Size of the preprocessed image
             
         Returns:
             processed_img: Processed image (model input)
         """
-        # Convert BGR to RGB
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        
-        # Resize image
-        image = cv2.resize(image, (224, 224))
-        
-        # Normalize image to [0, 1]
-        image = image.astype(np.float32) / 255.0
-        
-        # Normalize with mean and std
-        mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
-        std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
-        image = (image - mean) / std
-        
-        # Rearrange channels (HWC -> CHW)
-        image = image.transpose(2, 0, 1)
-        
-        # Add batch dimension
-        image = np.expand_dims(image, axis=0)
-        
-        return image
+        try:
+            # BGR'den RGB'ye dönüştür
+            if self._rgb_buffer is None or self._rgb_buffer.shape != image.shape:
+                self._rgb_buffer = np.empty(image.shape, dtype=np.uint8)
+            
+            cv2.cvtColor(image, cv2.COLOR_BGR2RGB, dst=self._rgb_buffer)
+            
+            # Boyutlandır
+            if image.shape[:2] != target_size:
+                if self._resized_buffer is None or self._resized_buffer.shape[:2] != target_size:
+                    self._resized_buffer = np.empty((target_size[1], target_size[0], 3), dtype=np.uint8)
+                
+                cv2.resize(self._rgb_buffer, target_size, dst=self._resized_buffer)
+                image_rgb_resized = self._resized_buffer
+            else:
+                image_rgb_resized = self._rgb_buffer
+            
+            # [0, 1] aralığına normalize et
+            image_float = image_rgb_resized.astype(np.float32) / 255.0
+            
+            # Ortalama ve standart sapma ile normalize et
+            mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+            std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+            normalized = (image_float - mean) / std
+            
+            # Kanal sıralamasını değiştir (HWC -> CHW)
+            transposed = normalized.transpose(2, 0, 1)
+            
+            # Batch boyutunu ekle
+            batched = np.expand_dims(transposed, axis=0)
+            
+            return batched
+            
+        except Exception as e:
+            logger.error(f"Error preprocessing image: {str(e)}")
+            return np.zeros((1, 3, target_size[1], target_size[0]), dtype=np.float32)
     
     def predict_gaze(self, frame: np.ndarray, landmarks: List[List[float]]) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Predict gaze direction using ETH-XGaze model.
-        
-        Args:
-            frame: Input frame
-            landmarks: List of facial landmarks
+            """
+            Predict gaze direction using ETH-XGaze model.
             
-        Returns:
-            gaze_vector: Gaze direction vector (pitch, yaw)
-            normalized_image: Normalized face image
-        """
-        if self.onnx_session is None:
-            # Return empty vector if model is not loaded
-            return np.zeros(2), None
-        
-        # Normalize face
-        normalized_image = self.normalize_face(frame, landmarks, frame)
-        
-        # Preprocess image
-        processed_img = self.preprocess_image(normalized_image)
-        
-        # Run inference
-        input_name = self.onnx_session.get_inputs()[0].name
-        output_name = self.onnx_session.get_outputs()[0].name
-        gaze = self.onnx_session.run([output_name], {input_name: processed_img})[0]
-        
-        # Get gaze vector (pitch, yaw)
-        gaze_vector = gaze[0]
-        
-        return gaze_vector, normalized_image
+            Args:
+                frame: Input frame
+                landmarks: List of facial landmarks
+                
+            Returns:
+                gaze_vector: Gaze direction vector (pitch, yaw)
+                normalized_image: Normalized face image
+            """
+            if self.onnx_session is None:
+                # Model yüklü değilse boş vektör döndür
+                return np.zeros(2, dtype=np.float32), None
+            
+            try:
+                # Yüzü normalize et
+                normalized_image = self.normalize_face(frame, landmarks, frame)
+                
+                # Görüntü geçerli mi kontrol et
+                if normalized_image is None or normalized_image.size == 0 or np.all(normalized_image == 0):
+                    return np.zeros(2, dtype=np.float32), None
+                
+                # Görüntüyü ön işle
+                processed_img = self.preprocess_image(normalized_image)
+                
+                # Çıkarım yap
+                gaze = self.onnx_session.run([self.output_name], {self.input_name: processed_img})[0]
+                
+                # Bakış vektörünü al (pitch, yaw)
+                gaze_vector = gaze[0].astype(np.float32)
+                
+                return gaze_vector, normalized_image
+                
+            except Exception as e:
+                logger.error(f"Error in gaze prediction: {str(e)}")
+                return np.zeros(2, dtype=np.float32), None
     
     def draw_gaze(self, image: np.ndarray, pitchyaw: np.ndarray, origin: Tuple[int, int], 
-                 length: int = 50, thickness: int = 2, color: Tuple[int, int, int] = (0, 0, 255)) -> np.ndarray:
+                 length: int = 50, thickness: int = 2, color: Tuple[int, int, int] = (0, 0, 255),
+                 overlay: bool = True) -> np.ndarray:
         """
         Visualize gaze direction.
         
@@ -481,33 +620,40 @@ class GazeDetector:
             length: Arrow length
             thickness: Arrow thickness
             color: Arrow color
+            overlay: If True, draw on a copy of the image, else modify the original
             
         Returns:
             image: Image with gaze direction visualized
         """
-        pitch, yaw = pitchyaw
+        # Kopyalama veya doğrudan değiştirme
+        vis_image = image.copy() if overlay else image
         
-        # Convert pitch and yaw to radians if they're not already
-        # For the ETH-XGaze model, they are already in radians
-        pitch = pitch
-        yaw = yaw
-        
-        # Calculate gaze vector
-        x = -length * np.sin(yaw) * np.cos(pitch)
-        y = -length * np.sin(pitch)
-        z = -length * np.cos(yaw) * np.cos(pitch)
-        
-        # Project 3D vector to 2D
-        point_2d = (int(origin[0] + x), int(origin[1] + y))
-        
-        # Draw arrow
-        cv2.arrowedLine(image, origin, point_2d, color, thickness)
-        
-        return image
+        try:
+            pitch, yaw = pitchyaw
+            
+            # Bakış vektörü hesapla
+            x = -length * np.sin(yaw) * np.cos(pitch)
+            y = -length * np.sin(pitch)
+            
+            # 2D noktaya projeksiyon
+            point_2d = (int(origin[0] + x), int(origin[1] + y))
+            
+            # Ok çiz
+            cv2.arrowedLine(vis_image, origin, point_2d, color, thickness, cv2.LINE_AA, tipLength=0.2)
+            
+            # İsteğe bağlı: Açıları metin olarak göster
+            # cv2.putText(vis_image, f"P:{np.rad2deg(pitch):.1f} Y:{np.rad2deg(yaw):.1f}", 
+            #           (origin[0]-30, origin[1]-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+            
+            return vis_image
+            
+        except Exception as e:
+            logger.warning(f"Error drawing gaze: {str(e)}")
+            return vis_image
     
     def visualize_gaze(self, frame: np.ndarray, landmarks: List[List[float]], 
-                        ear_value: float = None, ear_threshold: float = 0.2,
-                        frame_skip: int = 3) -> Tuple[np.ndarray, np.ndarray]:
+                      ear_value: float = None, ear_threshold: float = 0.2,
+                      frame_skip: int = 3, overlay: bool = True) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         """
         Predict and visualize gaze direction.
         
@@ -517,75 +663,87 @@ class GazeDetector:
             ear_value: Eye Aspect Ratio value, used to check if eyes are open
             ear_threshold: EAR threshold, below which eyes are considered closed
             frame_skip: Number of frames to skip between predictions (for optimization)
+            overlay: If True, draw on a copy of the frame, else modify the original
             
         Returns:
             frame: Frame with visualized gaze direction
             normalized_image: Normalized face image (if available)
         """
+        # Kopyalama veya doğrudan değiştirme
+        vis_frame = frame.copy() if overlay else frame
+        
+        # Geçerlilik kontrolü
         if not landmarks or self.onnx_session is None:
-            return frame, None
+            return vis_frame, None
         
-        # If EAR value is provided and below threshold, don't visualize gaze (eyes are closed)
+        # Göz kapalı kontrolü (EAR kullanarak)
         if ear_value is not None and ear_value < ear_threshold:
-            return frame, None
+            return vis_frame, None
         
-        # Predict gaze every frame_skip frames, use previous prediction in between
+        # Her frame_skip karede bir tahmin yap, arada kalan karelerde son tahmini kullan
+        do_prediction = False
+        
         self._frame_counter += 1
         if self._frame_counter >= frame_skip:
-            # Predict gaze
-            self._last_gaze_vector, self._last_normalized_image = self.predict_gaze(frame, landmarks)
+            do_prediction = True
             self._frame_counter = 0
         
-        # If no previous prediction is available, make initial prediction
-        if self._last_gaze_vector is None or self._last_normalized_image is None:
+        # İlk tahmin veya yeni tahmin yapılacaksa
+        if do_prediction or self._last_gaze_vector is None or self._last_normalized_image is None:
             self._last_gaze_vector, self._last_normalized_image = self.predict_gaze(frame, landmarks)
         
+        # Tahmin sonuçları
         gaze_vector = self._last_gaze_vector
         normalized_image = self._last_normalized_image
         
+        # Geçerlilik kontrolü
         if gaze_vector is None:
-            return frame, None
+            return vis_frame, None
         
-        # Find eye centers
-        # Use outer and inner corners of each eye
-        left_eye_outer = 263  # Left eye outer corner
-        left_eye_inner = 362  # Left eye inner corner
-        right_eye_outer = 33  # Right eye outer corner
-        right_eye_inner = 133  # Right eye inner corner
-        
-        # Check if eye points are available
-        eye_points_valid = len(landmarks) > max(left_eye_outer, left_eye_inner, right_eye_outer, right_eye_inner)
+        # Göz merkezlerini bul
+        eye_points_valid = (len(landmarks) > max(self.LEFT_EYE_OUTER_IDX, self.LEFT_EYE_INNER_IDX, 
+                                              self.RIGHT_EYE_OUTER_IDX, self.RIGHT_EYE_INNER_IDX))
         
         if eye_points_valid:
-            # Calculate center of each eye
-            left_eye_center_x = (landmarks[left_eye_outer][0] + landmarks[left_eye_inner][0]) / 2
-            left_eye_center_y = (landmarks[left_eye_outer][1] + landmarks[left_eye_inner][1]) / 2
+            # Her göz için merkez hesapla
+            left_eye_center = (
+                int((landmarks[self.LEFT_EYE_OUTER_IDX][0] + landmarks[self.LEFT_EYE_INNER_IDX][0]) / 2),
+                int((landmarks[self.LEFT_EYE_OUTER_IDX][1] + landmarks[self.LEFT_EYE_INNER_IDX][1]) / 2)
+            )
             
-            right_eye_center_x = (landmarks[right_eye_outer][0] + landmarks[right_eye_inner][0]) / 2
-            right_eye_center_y = (landmarks[right_eye_outer][1] + landmarks[right_eye_inner][1]) / 2
+            right_eye_center = (
+                int((landmarks[self.RIGHT_EYE_OUTER_IDX][0] + landmarks[self.RIGHT_EYE_INNER_IDX][0]) / 2),
+                int((landmarks[self.RIGHT_EYE_OUTER_IDX][1] + landmarks[self.RIGHT_EYE_INNER_IDX][1]) / 2)
+            )
             
-            # Calculate midpoint between eyes (origin of gaze vector)
-            gaze_origin_x = int((left_eye_center_x + right_eye_center_x) / 2)
-            gaze_origin_y = int((left_eye_center_y + right_eye_center_y) / 2)
+            # Gözler arası orta nokta (bakış vektörünün başlangıç noktası)
+            gaze_origin = (
+                int((left_eye_center[0] + right_eye_center[0]) / 2),
+                int((left_eye_center[1] + right_eye_center[1]) / 2)
+            )
             
-            gaze_origin = (gaze_origin_x, gaze_origin_y)
+            # Başlangıç noktasını göster (küçük mavi daire)
+            cv2.circle(vis_frame, gaze_origin, 3, (255, 0, 0), -1)
             
-            # Visualize origin point (small blue circle)
-            cv2.circle(frame, gaze_origin, 3, (255, 0, 0), -1)
         else:
-            # If eye points are not valid, use center of face rectangle
+            # Göz noktaları geçerli değilse, yüz dikdörtgeninin merkezini kullan
             face_rect = self._get_face_rect(landmarks)
-            gaze_origin = (face_rect[0] + face_rect[2] // 2, face_rect[1] + face_rect[3] // 2)
+            gaze_origin = (
+                face_rect[0] + face_rect[2] // 2, 
+                face_rect[1] + face_rect[3] // 2
+            )
         
-        # Draw gaze direction
-        frame = self.draw_gaze(frame, gaze_vector, gaze_origin)
+        # Bakış yönünü çiz
+        vis_frame = self.draw_gaze(vis_frame, gaze_vector, gaze_origin, overlay=False)
         
-        # Show gaze angles on screen
+        # Bakış açılarını ekranda göster
         pitch, yaw = np.rad2deg(gaze_vector)
-        cv2.putText(frame, f"Pitch: {pitch:.1f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        cv2.putText(frame, f"Yaw: {yaw:.1f}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        cv2.putText(vis_frame, f"Pitch: {pitch:.1f}", (10, 30), 
+                  cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        cv2.putText(vis_frame, f"Yaw: {yaw:.1f}", (10, 60), 
+                  cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
         
-        return frame, normalized_image
+        return vis_frame, normalized_image
     
     def _get_face_rect(self, landmarks: List[List[float]], padding: float = 0.1) -> Tuple[int, int, int, int]:
         """
@@ -601,17 +759,16 @@ class GazeDetector:
         if not landmarks:
             return (0, 0, 0, 0)
         
-        # Extract x, y coordinates
-        x_coords = [landmark[0] for landmark in landmarks]
-        y_coords = [landmark[1] for landmark in landmarks]
+        # NumPy ile daha verimli işlem
+        landmarks_array = np.array(landmarks)
         
-        # Find bounding box
-        left = int(min(x_coords))
-        top = int(min(y_coords))
-        right = int(max(x_coords))
-        bottom = int(max(y_coords))
+        # Minimum ve maksimum koordinatları bul
+        left = int(np.min(landmarks_array[:, 0]))
+        top = int(np.min(landmarks_array[:, 1]))
+        right = int(np.max(landmarks_array[:, 0]))
+        bottom = int(np.max(landmarks_array[:, 1]))
         
-        # Add padding
+        # Dolgu ekle
         width = right - left
         height = bottom - top
         padding_x = int(width * padding)
@@ -623,7 +780,115 @@ class GazeDetector:
         bottom = bottom + padding_y
         
         return (left, top, right - left, bottom - top)
+    
+    def check_attention(self, gaze_vector: np.ndarray, 
+                       max_pitch_deviation: float = 30.0,
+                       max_yaw_deviation: float = 40.0) -> float:
+        """
+        Calculate driver attention score based on gaze vector.
+        
+        Args:
+            gaze_vector: (pitch, yaw) gaze direction in radians
+            max_pitch_deviation: Maximum allowed pitch deviation in degrees
+            max_yaw_deviation: Maximum allowed yaw deviation in degrees
+            
+        Returns:
+            float: Attention score (0.0-1.0), where 1.0 is full attention
+        """
+        if gaze_vector is None or len(gaze_vector) < 2:
+            return 1.0  # Varsayılan olarak tam dikkat
+        
+        # Radyandan dereceye çevir
+        pitch_deg = np.rad2deg(gaze_vector[0])
+        yaw_deg = np.rad2deg(gaze_vector[1])
+        
+        # Yatay sapma (yaw - sağa/sola bakma)
+        yaw_attention = 1.0 - min(1.0, abs(yaw_deg) / max_yaw_deviation)
+        
+        # Dikey sapma (pitch - yukarı/aşağı bakma)
+        pitch_attention = 1.0 - min(1.0, abs(pitch_deg) / max_pitch_deviation)
+        
+        # Toplam dikkat skoru (en düşük değeri al)
+        attention = min(yaw_attention, pitch_attention)
+        
+        return max(0.0, min(1.0, attention))
+    
+    def is_looking_forward(self, gaze_vector: np.ndarray, 
+                         max_pitch_deg: float = 15.0,
+                         max_yaw_deg: float = 20.0) -> bool:
+        """
+        Check if driver is looking forward based on gaze vector.
+        
+        Args:
+            gaze_vector: (pitch, yaw) gaze direction in radians
+            max_pitch_deg: Maximum allowed pitch deviation in degrees
+            max_yaw_deg: Maximum allowed yaw deviation in degrees
+            
+        Returns:
+            bool: True if looking forward, False otherwise
+        """
+        attention = self.check_attention(gaze_vector, max_pitch_deg, max_yaw_deg)
+        return attention > 0.7  # %70'ten fazla dikkat ileri bakıyor sayılır
+    
+    def get_gaze_target_zone(self, gaze_vector: np.ndarray) -> str:
+        """
+        Determine which zone the driver is looking at.
+        
+        Args:
+            gaze_vector: (pitch, yaw) gaze direction in radians
+            
+        Returns:
+            str: Zone name ('road', 'dashboard', 'left_mirror', 'right_mirror', 'rearview_mirror', 'other')
+        """
+        if gaze_vector is None or len(gaze_vector) < 2:
+            return 'unknown'
+        
+        # Radyandan dereceye çevir
+        pitch_deg = np.rad2deg(gaze_vector[0])
+        yaw_deg = np.rad2deg(gaze_vector[1])
+        
+        # Bölge tanımları (değerler yaklaşıktır ve araç yapısına göre ayarlanabilir)
+        if abs(yaw_deg) < 20 and abs(pitch_deg) < 10:
+            return 'road'  # Yol - ileri bakış
+        elif abs(yaw_deg) < 25 and pitch_deg > 10:
+            return 'dashboard'  # Gösterge paneli
+        elif yaw_deg < -30 and abs(pitch_deg) < 15:
+            return 'left_mirror'  # Sol ayna
+        elif yaw_deg > 30 and abs(pitch_deg) < 15:
+            return 'right_mirror'  # Sağ ayna
+        elif abs(yaw_deg) < 10 and pitch_deg < -10:
+            return 'rearview_mirror'  # Dikiz aynası
+        else:
+            return 'other'  # Diğer bölgeler
+    
+    def reset(self):
+        """Reset frame counter and cached values."""
+        self._frame_counter = 0
+        self._last_gaze_vector = None
+        self._last_normalized_image = None
+        self._rgb_buffer = None
+        self._resized_buffer = None
+        
+    def release(self):
+        """Release resources."""
+        self.onnx_session = None
+        self._camera_matrix_cache.clear()
+        self._transform_matrix_cache.clear()
+        self.reset()
 
 
-# Create a singleton instance
-gaze_detector = GazeDetector() 
+# Create a function to get a pre-configured GazeDetector
+def get_gaze_detector(model_path: str = None, frame_skip: int = 3) -> GazeDetector:
+    """
+    Factory function to create and configure a GazeDetector instance.
+    
+    Args:
+        model_path: Optional path to the ONNX model file
+        frame_skip: Number of frames to skip between predictions
+    
+    Returns:
+        GazeDetector: Configured GazeDetector instance
+    """
+    detector = GazeDetector(model_path)
+    detector._frame_skip = frame_skip
+    return detector

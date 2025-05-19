@@ -469,51 +469,16 @@ class DriverDrowsinessMainWindow(QMainWindow):
                 else:
                     perclos = (sum(self.eye_closure_history) / len(self.eye_closure_history)) * 100.0
             
-            # Draw landmarks if enabled
-            if self.show_landmarks:
-                # Create connections for eyes (to form a polygon)
-                left_eye_connections = [(i, i+1) for i in range(len(left_eye_landmarks)-1)]
-                left_eye_connections.append((len(left_eye_landmarks)-1, 0))  # Close the loop
-                
-                right_eye_connections = [(i, i+1) for i in range(len(right_eye_landmarks)-1)]
-                right_eye_connections.append((len(right_eye_landmarks)-1, 0))  # Close the loop
-                
-                # Create connections for inner lip (to form a polygon)
-                inner_lip_connections = [(i, i+1) for i in range(len(inner_lip_landmarks)-1)]
-                inner_lip_connections.append((len(inner_lip_landmarks)-1, 0))  # Close the loop
-                
-                # Draw eye landmarks and connections
-                frame = self.mediapipe_helper.draw_facial_landmarks(
-                    frame, left_eye_landmarks, 
-                    connections=left_eye_connections,
-                    landmark_color=(0, 255, 0), 
-                    connection_color=(0, 255, 0),
-                    landmark_radius=2,
-                    connection_thickness=1
-                )
-                frame = self.mediapipe_helper.draw_facial_landmarks(
-                    frame, right_eye_landmarks, 
-                    connections=right_eye_connections,
-                    landmark_color=(0, 255, 0), 
-                    connection_color=(0, 255, 0),
-                    landmark_radius=2,
-                    connection_thickness=1
-                )
-                
-                # Draw only inner lip landmarks and connections
-                frame = self.mediapipe_helper.draw_facial_landmarks(
-                    frame, inner_lip_landmarks, 
-                    connections=inner_lip_connections,
-                    landmark_color=(255, 0, 0), 
-                    connection_color=(255, 0, 0),
-                    landmark_radius=2,
-                    connection_thickness=1
-                )
+            # ÖNEMLİ: Önce baş duruşu ve göz bakış yönü hesaplaması yap
+            # Çünkü bu hesaplamalar orijinal landmark'ları kullanmalı
+            
+            # Görüntünün bir kopyasını oluştur
+            processed_frame = frame.copy()
             
             # Visualize head pose if enabled
             if self.show_head_pose:
-                frame = self.mediapipe_helper.visualize_head_pose(
-                    frame, 
+                processed_frame = self.mediapipe_helper.visualize_head_pose(
+                    processed_frame, 
                     landmarks,
                     visualization_type='cube'
                 )
@@ -522,8 +487,8 @@ class DriverDrowsinessMainWindow(QMainWindow):
             if self.show_gaze:
                 ear_threshold = self.config.get('detection', {}).get('ear_threshold', 0.21)
                 frame_skip = self.config.get('detection', {}).get('gaze', {}).get('frame_skip', 3)
-                frame, normalized_face = self.mediapipe_helper.visualize_gaze(
-                    frame, 
+                processed_frame, normalized_face = self.mediapipe_helper.visualize_gaze(
+                    processed_frame, 
                     landmarks,
                     ear_value=ear,
                     ear_threshold=ear_threshold,
@@ -537,7 +502,48 @@ class DriverDrowsinessMainWindow(QMainWindow):
                     
                     # Görüntüyü ana kareye yerleştir (sağ üst köşe)
                     h, w = norm_face_display.shape[:2]
-                    frame[10:10+h, frame.shape[1]-w-10:frame.shape[1]-10] = norm_face_display
+                    processed_frame[10:10+h, processed_frame.shape[1]-w-10:processed_frame.shape[1]-10] = norm_face_display
+            
+            # Draw landmarks if enabled - SON OLARAK YÜZ İŞARETLERİNİ ÇİZ
+            if self.show_landmarks:
+                # Create connections for eyes (to form a polygon)
+                left_eye_connections = [(i, i+1) for i in range(len(left_eye_landmarks)-1)]
+                left_eye_connections.append((len(left_eye_landmarks)-1, 0))  # Close the loop
+                
+                right_eye_connections = [(i, i+1) for i in range(len(right_eye_landmarks)-1)]
+                right_eye_connections.append((len(right_eye_landmarks)-1, 0))  # Close the loop
+                
+                # Create connections for inner lip (to form a polygon)
+                inner_lip_connections = [(i, i+1) for i in range(len(inner_lip_landmarks)-1)]
+                inner_lip_connections.append((len(inner_lip_landmarks)-1, 0))  # Close the loop
+                
+                # Draw eye landmarks and connections
+                processed_frame = self.mediapipe_helper.draw_facial_landmarks(
+                    processed_frame, left_eye_landmarks, 
+                    connections=left_eye_connections,
+                    landmark_color=(0, 255, 0), 
+                    connection_color=(0, 255, 0),
+                    landmark_radius=2,
+                    connection_thickness=1
+                )
+                processed_frame = self.mediapipe_helper.draw_facial_landmarks(
+                    processed_frame, right_eye_landmarks, 
+                    connections=right_eye_connections,
+                    landmark_color=(0, 255, 0), 
+                    connection_color=(0, 255, 0),
+                    landmark_radius=2,
+                    connection_thickness=1
+                )
+                
+                # Draw only inner lip landmarks and connections
+                processed_frame = self.mediapipe_helper.draw_facial_landmarks(
+                    processed_frame, inner_lip_landmarks, 
+                    connections=inner_lip_connections,
+                    landmark_color=(255, 0, 0), 
+                    connection_color=(255, 0, 0),
+                    landmark_radius=2,
+                    connection_thickness=1
+                )
             
             # Update drowsiness detection
             from src.detection.drowsiness_detector import DrowsinessDetector
@@ -553,12 +559,15 @@ class DriverDrowsinessMainWindow(QMainWindow):
             )
             
             # Visualize drowsiness detection results
-            frame = drowsiness_detector.visualize(
-                frame, 
+            processed_frame = drowsiness_detector.visualize(
+                processed_frame, 
                 ear_left=left_ear, 
                 ear_right=right_ear,
                 show_metrics=True
             )
+            
+            # İşlenmiş kareyi kullan
+            frame = processed_frame
         
         # FPS hesapla
         frame_processing_time = time.time() - frame_start_time
