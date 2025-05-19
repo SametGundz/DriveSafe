@@ -15,7 +15,7 @@ import cv2
 import numpy as np
 import mediapipe as mp
 import logging
-from typing import List, Tuple, Dict, Optional, Union
+from typing import List, Tuple, Dict, Optional, Union, Sequence
 
 # Import constants
 from src.utils.constants import (
@@ -92,7 +92,7 @@ class FaceLandmarkDetector:
         results = self.face_mesh.process(rgb_frame)
         
         # Initialize empty list for landmarks
-        landmarks = []
+        landmarks: List[List[float]] = []
         face_detected = False
         
         # Extract landmarks if a face is detected
@@ -166,7 +166,7 @@ class FaceLandmarkDetector:
             return []
         
         # Extract requested landmarks if available
-        selected_landmarks = []
+        selected_landmarks: List[List[float]] = []
         for idx in indices:
             if idx < len(landmarks):
                 selected_landmarks.append(landmarks[idx])
@@ -272,7 +272,7 @@ class FaceLandmarkDetector:
         logger.debug(f"Drew {len(landmarks)} landmarks on frame")
         return vis_frame
     
-    def release(self):
+    def release(self) -> None:
         """Release MediaPipe resources."""
         try:
             if hasattr(self, 'face_mesh') and self.face_mesh:

@@ -15,7 +15,7 @@ import time
 import numpy as np
 import logging
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Union
 import cv2
 
 from src.utils.constants import (
@@ -178,7 +178,7 @@ class DrowsinessDetector:
             'is_drowsy_by_gaze': self.state.is_drowsy_by_gaze
         }
     
-    def _update_eye_closure_state(self, ear_value: float, current_time: float):
+    def _update_eye_closure_state(self, ear_value: float, current_time: float) -> None:
         """
         Update eye closure state based on current EAR value.
         
@@ -208,7 +208,7 @@ class DrowsinessDetector:
         
         self.state.is_eyes_closed = is_eyes_closed_now
     
-    def _update_perclos(self, current_time: float):
+    def _update_perclos(self, current_time: float) -> None:
         """
         Update PERCLOS (percentage of eye closure over time).
         
@@ -241,7 +241,7 @@ class DrowsinessDetector:
         if self.state.total_time > 0:
             self.state.perclos = (self.state.closed_time / self.state.total_time) * 100.0
     
-    def _update_ear_drowsiness(self, current_time: float):
+    def _update_ear_drowsiness(self, current_time: float) -> None:
         """
         Update drowsiness detection based on EAR values.
         
@@ -256,7 +256,7 @@ class DrowsinessDetector:
         else:
             self.state.is_drowsy_by_ear = False
     
-    def _update_perclos_drowsiness(self):
+    def _update_perclos_drowsiness(self) -> None:
         """Update drowsiness detection based on PERCLOS value."""
         previous_state = self.state.is_drowsy_by_perclos
         
@@ -270,7 +270,7 @@ class DrowsinessDetector:
             if previous_state:
                 logger.info(f"PERCLOS returned to normal: {self.state.perclos:.2f}%")
     
-    def _update_head_pose_drowsiness(self, pitch: float, yaw: float):
+    def _update_head_pose_drowsiness(self, pitch: float, yaw: float) -> None:
         """
         Update drowsiness detection based on head pose.
         
@@ -288,7 +288,7 @@ class DrowsinessDetector:
         else:
             self.state.is_drowsy_by_head_pose = False
     
-    def _update_gaze_drowsiness(self, gaze_pitch: float, gaze_yaw: float):
+    def _update_gaze_drowsiness(self, gaze_pitch: float, gaze_yaw: float) -> None:
         """
         Update drowsiness detection based on gaze direction.
         
@@ -335,7 +335,7 @@ class DrowsinessDetector:
         
         return drowsiness_level
     
-    def _update_alert_status(self, drowsiness_level: float, current_time: float):
+    def _update_alert_status(self, drowsiness_level: float, current_time: float) -> None:
         """
         Update drowsiness alert status.
         
@@ -363,7 +363,8 @@ class DrowsinessDetector:
                 self.state.alert_start_time = None
                 logger.info(f"Drowsiness alert deactivated: Level={drowsiness_level:.2f}")
     
-    def compute_ear_from_landmarks(self, left_eye_landmarks, right_eye_landmarks):
+    def compute_ear_from_landmarks(self, left_eye_landmarks: List[List[float]], 
+                                   right_eye_landmarks: List[List[float]]) -> float:
         """
         Compute EAR from eye landmarks.
         
@@ -381,7 +382,7 @@ class DrowsinessDetector:
         # Return average EAR
         return (left_ear + right_ear) / 2.0
     
-    def reset(self):
+    def reset(self) -> None:
         """Reset the detector state."""
         self.state = DrowsinessState()
         logger.info("DrowsinessDetector state reset")
