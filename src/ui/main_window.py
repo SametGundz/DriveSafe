@@ -262,10 +262,15 @@ class DriverDrowsinessMainWindow(QMainWindow):
         self.head_pose_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         # Merkezi bölgede 3D model için bir container oluştur
         model_container = QVBoxLayout()
+        model_container.setContentsMargins(1, 1, 1, 1)  # Minimum boşluk (1 piksel)
+        model_container.setSpacing(0)  # İç boşlukları tamamen kaldır
         model_container.addWidget(self.head_pose_panel)
+        
         model_widget = QWidget()
         model_widget.setLayout(model_container)
         model_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        # 3D model container'ı için arka plan rengini ayarla, sınırı en aza indir
+        model_widget.setStyleSheet("background-color: black; border: none; padding: 0px; margin: 0px;")
         # Stretch faktörünü 1 olarak ayarla (sabit genişlik oranı)
         top_layout.addWidget(model_widget, 1)
         
@@ -741,7 +746,7 @@ class DriverDrowsinessMainWindow(QMainWindow):
                 processed_frame, 
                 ear_left=left_ear, 
                 ear_right=right_ear,
-                show_metrics=True
+                show_metrics=False
             )
             
             # İşlenmiş kareyi kullan
@@ -753,15 +758,39 @@ class DriverDrowsinessMainWindow(QMainWindow):
         
         # FPS'i göster
         if self.config.get('visualization', {}).get('show_fps', True):
-            # FPS yazısını ekle (sol alt köşe)
+            # FPS metni
+            fps_text = f"FPS: {current_fps:.1f}"
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 0.5  # Daha küçük font
+            thickness = 1     # Daha ince font
+            font_color = (0, 255, 255)  # Sarı-yeşil renk
+            
+            # Metin boyutunu al
+            (text_width, text_height), baseline = cv2.getTextSize(fps_text, font, font_scale, thickness)
+            
+            # Sağ alt köşe pozisyonu
+            text_x = frame.shape[1] - text_width - 10
+            text_y = frame.shape[0] - 10
+            
+            # Arka plan kutusu çiz
+            padding = 5
+            cv2.rectangle(
+                frame,
+                (text_x - padding, text_y - text_height - padding),
+                (text_x + text_width + padding, text_y + padding),
+                (0, 0, 0),  # Siyah
+                -1  # Dolu
+            )
+            
+            # FPS yazısını ekle
             cv2.putText(
-                frame, 
-                f"FPS: {current_fps:.1f}", 
-                (10, frame.shape[0] - 10), 
-                cv2.FONT_HERSHEY_SIMPLEX, 
-                0.7, 
-                (0, 255, 255), 
-                2
+                frame,
+                fps_text,
+                (text_x, text_y),
+                font,
+                font_scale,
+                font_color,
+                thickness
             )
         
         # Display the frame
