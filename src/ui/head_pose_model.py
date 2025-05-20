@@ -9,6 +9,7 @@ görselleştiren bir widget sağlar.
 """
 
 import numpy as np
+import os
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QPushButton, QCheckBox
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QSurfaceFormat
@@ -22,6 +23,8 @@ import math
 import random
 import sys
 import time
+import pywavefront
+from PIL import Image
 
 # Get module-specific logger
 logger = logging.getLogger(__name__)
@@ -87,7 +90,7 @@ class HeadPoseModelWidget(QOpenGLWidget):
         # Görünüm ayarları
         self.x_trans = 0.0
         self.y_trans = 0.0
-        self.z_trans = -5.0  # Kameradan uzaklık
+        self.z_trans = -8.0  # Daha uzak bir kamera konumu
         self.scale = 1.0
         
         # Model rengi (varsayılan ten rengi)
@@ -100,6 +103,56 @@ class HeadPoseModelWidget(QOpenGLWidget):
         # Grid görüntüleme
         self.show_grid = False
         
+        # OBJ Model ile ilgili değişkenler
+        self.face_obj = None
+        self.face_texture_id = None
+        self.face_display_list = None
+        self.use_obj_model = True  # OBJ model kullanımını kontrol eden bayrak
+        
+        # OBJ model yolları
+        self.face_obj_path = os.path.join("models", "face", "face.obj")
+        self.face_texture_path = os.path.join("models", "face", "face_texture.png")
+        
+        # OBJ model yükleme
+        try:
+            self.face_obj = pywavefront.Wavefront(
+                self.face_obj_path,
+                create_materials=True,
+                collect_faces=True,
+                parse=True,
+                strict=False  # Daha esnek OBJ ayrıştırma
+            )
+            logger.info(f"3D face model loaded: {self.face_obj_path} with {len(self.face_obj.meshes)} meshes")
+            
+            # Model ölçeği ve konumunu ayarla
+            min_x = min_y = min_z = float('inf')
+            max_x = max_y = max_z = float('-inf')
+            
+            # Modelin sınırlarını bul - vertices'i doğrudan kullan
+            for vertex in self.face_obj.vertices:
+                if len(vertex) >= 3:
+                    x, y, z = vertex
+                    min_x = min(min_x, x)
+                    min_y = min(min_y, y)
+                    min_z = min(min_z, z)
+                    max_x = max(max_x, x)
+                    max_y = max(max_y, y)
+                    max_z = max(max_z, z)
+            
+            # Modelin merkezini ve ölçeğini ayarla
+            if min_x != float('inf'):
+                self.model_center = ((min_x + max_x) / 2, (min_y + max_y) / 2, (min_z + max_z) / 2)
+                self.model_size = max(max_x - min_x, max_y - min_y, max_z - min_z)
+                logger.info(f"Model center: {self.model_center}, size: {self.model_size}")
+            else:
+                self.model_center = (0, 0, 0)
+                self.model_size = 2.0
+                
+        except Exception as e:
+            self.use_obj_model = False
+            logger.error(f"Error loading 3D face model: {str(e)}")
+            logger.warning("Falling back to simple face model")
+        
         # Modelin sınırları
         self.model_bounds = {
             'min_x': -1.0, 'max_x': 1.0,
@@ -107,7 +160,7 @@ class HeadPoseModelWidget(QOpenGLWidget):
             'min_z': -1.0, 'max_z': 1.0
         }
         
-        # Yüz modeli için örnek veri (küre ve silindirler)
+        # Yüz modeli için örnek veri (küre ve silindirler) - fallback için
         self.face_model = self._generate_face_model()
         
         # Widget'ı boyutlandır
@@ -289,6 +342,11 @@ class HeadPoseModelWidget(QOpenGLWidget):
                 for display_list in self.display_lists:
                     if glIsList(display_list):
                         glDeleteLists(display_list, 1)
+                
+                # Doku kaynaklarını temizle
+                if hasattr(self, 'face_texture_id') and self.face_texture_id:
+                    glDeleteTextures([self.face_texture_id])
+                
                 self.doneCurrent()
             
             # Timer'ları durdur
@@ -345,6 +403,9 @@ class HeadPoseModelWidget(QOpenGLWidget):
         if hasattr(self, 'animation_timer') and self.animation_timer.isActive():
             self.animation_timer.stop()
         
+        # OBJ modeli kaynakları serbest bırak
+        self.face_obj = None
+        
         # Ek kaynakları serbest bırak (ONNX modeli gibi ağır kaynakları)
         # Not: Bu widget doğrudan ONNX kullanmıyor, ancak gerekirse burada
         # diğer ağır kaynaklar temizlenebilir
@@ -397,12 +458,31 @@ class HeadPoseModelWidget(QOpenGLWidget):
             diffuse_light = [0.8, 0.8, 0.8, 1.0]
             glLightfv(GL_LIGHT0, GL_DIFFUSE, diffuse_light)
             
+            # OBJ modeli için doku ve display list oluştur
+            if self.use_obj_model and self.face_obj:
+                # Doku yükle
+                self.face_texture_id = self._load_texture()
+                
+                # OBJ modeli için display list oluştur
+                self.face_display_list = self._create_obj_display_list()
+                
+                if self.face_display_list:
+                    # Display list'i kaynaklara ekle
+                    self.display_lists.append(self.face_display_list)
+                    logger.info("OBJ model display list created successfully")
+                else:
+                    # Geri dönüş mekanizması için basit modele geç
+                    self.use_obj_model = False
+                    logger.warning("Failed to create OBJ model display list, using simple model")
+            
             # OpenGL başlatıldı olarak işaretle
             self.gl_initialized = True
             
             logger.debug("OpenGL initialized for HeadPoseModelWidget")
         except Exception as e:
             logger.error(f"Error initializing OpenGL: {str(e)}")
+            # OBJ model kullanımını devre dışı bırak
+            self.use_obj_model = False
     
     def resizeGL(self, width, height):
         """
@@ -431,93 +511,132 @@ class HeadPoseModelWidget(QOpenGLWidget):
         if not hasattr(self, 'rendering_active') or not self.rendering_active:
             return
             
-        # Buffer'ları temizle
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
-        glLoadIdentity()
-        
-        # Kamerayı konumlandır
-        glTranslatef(self.x_trans, self.y_trans, self.z_trans)
-        
-        # Head pose açılarına göre modeli döndür - rotasyon sırası önemli!
-        # Sıralama: önce yaw, sonra pitch, en son roll (gimbal lock problemini azaltır)
-        glRotatef(self.yaw, 0, 1, 0)     # Y-ekseni etrafında dönüş (yaw - sağa/sola dönme)
-        glRotatef(self.pitch, 1, 0, 0)   # X-ekseni etrafında dönüş (pitch - yukarı/aşağı bakma)
-        glRotatef(self.roll, 0, 0, 1)    # Z-ekseni etrafında dönüş (roll - başı yana yatırma)
-        
-        # Eksenler (X: kırmızı, Y: yeşil, Z: mavi)
-        if self.axes_enabled:
-            self._draw_axes()
-        
-        # Grid göster
-        if self.show_grid:
-            self._draw_grid()
-        
-        # Yüz modeli bileşenlerini çiz
-        for part_name, part in self.face_model.items():
-            if part['type'] == 'sphere':
-                self._draw_sphere(part)
-            elif part['type'] == 'cylinder':
-                self._draw_cylinder(part)
-        
-        # Head pose bilgilerini göster - daha okunaklı metin düzeni
-        # Ekranın sol üst köşesinde göster
-        self._draw_text(f"Pitch (X): {self.pitch:.1f}°", -1.5, 1.5, 0)
-        self._draw_text(f"Yaw (Y): {self.yaw:.1f}°", -1.5, 1.3, 0)
-        self._draw_text(f"Roll (Z): {self.roll:.1f}°", -1.5, 1.1, 0)
-        
-        # Show debug info if enabled
-        if hasattr(self, 'show_debug_info') and self.show_debug_info:
-            self._draw_debug_info()
+        try:
+            # Buffer'ları temizle
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+            glLoadIdentity()
+            
+            # Kamerayı konumlandır
+            glTranslatef(self.x_trans, self.y_trans, self.z_trans)
+            
+            # Head pose açılarına göre modeli döndür - rotasyon sırası önemli!
+            # Sıralama: önce yaw, sonra pitch, en son roll (gimbal lock problemini azaltır)
+            glRotatef(self.yaw, 0, 1, 0)     # Y-ekseni etrafında dönüş (yaw - sağa/sola dönme)
+            glRotatef(self.pitch, 1, 0, 0)   # X-ekseni etrafında dönüş (pitch - yukarı/aşağı bakma)
+            glRotatef(self.roll, 0, 0, 1)    # Z-ekseni etrafında dönüş (roll - başı yana yatırma)
+            
+            # Eksenler (X: kırmızı, Y: yeşil, Z: mavi)
+            if self.axes_enabled:
+                self._draw_axes()
+            
+            # Grid göster
+            if self.show_grid:
+                self._draw_grid()
+            
+            # OBJ modeli veya basit modeli çiz
+            if self.use_obj_model and self.face_display_list and glIsList(self.face_display_list):
+                # Model ölçeği ve konumu için ayarlama yap
+                glPushMatrix()
+                
+                # Model boyutunu normalize et (1-2 birim boyut)
+                normalize_scale = 2.0 / self.model_size if hasattr(self, 'model_size') else 1.0
+                
+                # OBJ modeli ölçeklendir - model boyutuna göre ayarla
+                glScalef(normalize_scale, normalize_scale, normalize_scale)
+                
+                # Modeli merkezle - 0,0,0'a getir
+                if hasattr(self, 'model_center'):
+                    cx, cy, cz = self.model_center
+                    glTranslatef(-cx, -cy, -cz)
+                    
+                try:
+                    # Display list ile OBJ modelini çiz
+                    glCallList(self.face_display_list)
+                except Exception as e:
+                    logger.error(f"Error calling display list: {str(e)}")
+                    # Basit küre çiz
+                    glColor3f(0.9, 0.8, 0.7)  # Ten rengi
+                    glutSolidSphere(1.0, 16, 16)
+                
+                glPopMatrix()
+            else:
+                # Yüz modeli bileşenlerini çiz (geri dönüş mekanizması)
+                for part_name, part in self.face_model.items():
+                    if part['type'] == 'sphere':
+                        self._draw_sphere(part)
+                    elif part['type'] == 'cylinder':
+                        self._draw_cylinder(part)
+            
+            # Head pose bilgilerini göster - daha okunaklı metin düzeni
+            # Ekranın sol üst köşesinde göster
+            self._draw_text(f"Pitch (X): {self.pitch:.1f}°", -1.5, 1.5, 0)
+            self._draw_text(f"Yaw (Y): {self.yaw:.1f}°", -1.5, 1.3, 0)
+            self._draw_text(f"Roll (Z): {self.roll:.1f}°", -1.5, 1.1, 0)
+            
+            # Show debug info if enabled
+            if hasattr(self, 'show_debug_info') and self.show_debug_info:
+                self._draw_debug_info()
+                
+        except Exception as e:
+            logger.error(f"Error in paintGL: {str(e)}")
+            # GL hatasını temizle
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
     
     def _draw_axes(self):
         """Koordinat eksenlerini ve etiketlerini çiz."""
-        # Işığı devre dışı bırak (daha net görünüm için)
-        glDisable(GL_LIGHTING)
-        
-        # Çizgi kalınlığını ayarla
-        glLineWidth(2.0)
-        
-        # Daha uzun eksenler çiz
-        axis_length = self.axes_length * 1.5
-        
-        glBegin(GL_LINES)
-        
-        # X ekseni (kırmızı) - Pitch ekseni (yukarı/aşağı)
-        glColor3f(1.0, 0.0, 0.0)
-        glVertex3f(0.0, 0.0, 0.0)
-        glVertex3f(axis_length, 0.0, 0.0)
-        
-        # Y ekseni (yeşil) - Yaw ekseni (sağa/sola)
-        glColor3f(0.0, 1.0, 0.0)
-        glVertex3f(0.0, 0.0, 0.0)
-        glVertex3f(0.0, axis_length, 0.0)
-        
-        # Z ekseni (mavi) - Roll ekseni (saat yönü/tersine)
-        glColor3f(0.0, 0.0, 1.0)
-        glVertex3f(0.0, 0.0, 0.0)
-        glVertex3f(0.0, 0.0, axis_length)
-        
-        glEnd()
-        
-        # Eksen etiketlerini çiz
-        glColor3f(1.0, 0.0, 0.0)  # Kırmızı
-        self._draw_text("X", axis_length * 1.1, 0, 0)
-        
-        glColor3f(0.0, 1.0, 0.0)  # Yeşil
-        self._draw_text("Y", 0, axis_length * 1.1, 0)
-        
-        glColor3f(0.0, 0.0, 1.0)  # Mavi
-        self._draw_text("Z", 0, 0, axis_length * 1.1)
-        
-        # Hareket eksenlerini açıklayıcı metin
-        glColor3f(0.7, 0.7, 0.7)  # Gri
-        self._draw_text("Pitch", axis_length * 0.5, -0.2, 0)
-        self._draw_text("Yaw", -0.2, axis_length * 0.5, 0)
-        self._draw_text("Roll", -0.2, 0, axis_length * 0.5)
-        
-        # Varsayılan değerlere geri dön
-        glLineWidth(1.0)
-        glEnable(GL_LIGHTING)
+        try:
+            # Işığı devre dışı bırak (daha net görünüm için)
+            glDisable(GL_LIGHTING)
+            
+            # Çizgi kalınlığını ayarla
+            glLineWidth(2.0)
+            
+            # Daha uzun eksenler çiz
+            axis_length = self.axes_length * 1.5
+            
+            glBegin(GL_LINES)
+            
+            # X ekseni (kırmızı) - Pitch ekseni (yukarı/aşağı)
+            glColor3f(1.0, 0.0, 0.0)
+            glVertex3f(0.0, 0.0, 0.0)
+            glVertex3f(axis_length, 0.0, 0.0)
+            
+            # Y ekseni (yeşil) - Yaw ekseni (sağa/sola)
+            glColor3f(0.0, 1.0, 0.0)
+            glVertex3f(0.0, 0.0, 0.0)
+            glVertex3f(0.0, axis_length, 0.0)
+            
+            # Z ekseni (mavi) - Roll ekseni (saat yönü/tersine)
+            glColor3f(0.0, 0.0, 1.0)
+            glVertex3f(0.0, 0.0, 0.0)
+            glVertex3f(0.0, 0.0, axis_length)
+            
+            glEnd()
+            
+            # Eksen etiketlerini çiz
+            glColor3f(1.0, 0.0, 0.0)  # Kırmızı
+            self._draw_text("X", axis_length * 1.1, 0, 0)
+            
+            glColor3f(0.0, 1.0, 0.0)  # Yeşil
+            self._draw_text("Y", 0, axis_length * 1.1, 0)
+            
+            glColor3f(0.0, 0.0, 1.0)  # Mavi
+            self._draw_text("Z", 0, 0, axis_length * 1.1)
+            
+            # Hareket eksenlerini açıklayıcı metin
+            glColor3f(0.7, 0.7, 0.7)  # Gri
+            self._draw_text("Pitch", axis_length * 0.5, -0.2, 0)
+            self._draw_text("Yaw", -0.2, axis_length * 0.5, 0)
+            self._draw_text("Roll", -0.2, 0, axis_length * 0.5)
+            
+            # Varsayılan değerlere geri dön
+            glLineWidth(1.0)
+            glEnable(GL_LIGHTING)
+        except Exception as e:
+            logger.error(f"Error drawing axes: {str(e)}")
+            # Varsayılan değerlere geri dön
+            glLineWidth(1.0)
+            glEnable(GL_LIGHTING)
     
     def _draw_grid(self):
         """3D sahneye grid çiz."""
@@ -781,22 +900,34 @@ class HeadPoseModelWidget(QOpenGLWidget):
         self.update()  # Widget'ı yeniden çiz
     
     def reset_view(self):
-        """Görünümü varsayılan konuma sıfırla."""
+        """Kamera görünümünü ve modeli sıfırla."""
+        # Pozisyon ve rotasyonu sıfırla
         self.pitch = 0.0
         self.yaw = 0.0
         self.roll = 0.0
         self.x_trans = 0.0
         self.y_trans = 0.0
-        self.z_trans = -5.0
+        self.z_trans = -8.0
         
         # Geçmiş değerleri sıfırla
+        self.pitch_history.clear()
+        self.yaw_history.clear()
+        self.roll_history.clear()
+        
+        # Geçmiş değerlere yeni sıfır değerler ekle
         for _ in range(self.history_size):
             self.pitch_history.append(0.0)
             self.yaw_history.append(0.0)
             self.roll_history.append(0.0)
             
-        self.update()  # Widget'ı yeniden çiz
-        logger.debug("View reset to default position")
+        # Hedef açıları sıfırla
+        self.target_pitch = 0.0
+        self.target_yaw = 0.0
+        self.target_roll = 0.0
+        
+        # Güncelleme yap
+        self.update()
+        logger.debug("3D model view reset")
 
     def _draw_debug_info(self):
         """Draw technical debug information"""
@@ -821,123 +952,240 @@ class HeadPoseModelWidget(QOpenGLWidget):
         
         glEnable(GL_LIGHTING)
 
+    def _load_texture(self):
+        """
+        Doku dosyasını yükler ve OpenGL dokusuna dönüştürür.
+        
+        Returns:
+            int: Doku ID'si
+        """
+        try:
+            if not os.path.exists(self.face_texture_path):
+                logger.error(f"Texture file not found: {self.face_texture_path}")
+                return None
+                
+            # PIL ile doku dosyasını yükle
+            texture_image = Image.open(self.face_texture_path)
+            
+            # Boyutu 2^n x 2^m olacak şekilde ayarla (OpenGL için optimal)
+            width, height = texture_image.size
+            width_2n = 2 ** (width - 1).bit_length()  # En yakın 2^n değeri
+            height_2m = 2 ** (height - 1).bit_length()  # En yakın 2^m değeri
+            
+            # Boyut ayarlaması gerekiyorsa yap
+            if width != width_2n or height != height_2m:
+                texture_image = texture_image.resize((width_2n, height_2m), Image.LANCZOS)
+                logger.info(f"Texture resized from {width}x{height} to {width_2n}x{height_2m}")
+            
+            # OpenGL için ters çevir (Y ekseni)
+            texture_image = texture_image.transpose(Image.FLIP_TOP_BOTTOM)
+            
+            # RGBA formatına dönüştür
+            texture_data = texture_image.convert("RGBA").tobytes()
+            
+            # OpenGL dokusunu oluştur
+            texture_id = glGenTextures(1)
+            glBindTexture(GL_TEXTURE_2D, texture_id)
+            
+            # Doku parametrelerini ayarla
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
+            
+            # Dokuyu yükle
+            glTexImage2D(
+                GL_TEXTURE_2D, 0, GL_RGBA,
+                texture_image.width, texture_image.height,
+                0, GL_RGBA, GL_UNSIGNED_BYTE, texture_data
+            )
+            
+            logger.info(f"Texture loaded: {self.face_texture_path}")
+            return texture_id
+        except Exception as e:
+            logger.error(f"Error loading texture: {str(e)}")
+            return None
+    
+    def _create_obj_display_list(self):
+        """
+        OBJ modeli için display list oluşturur. Bu, render performansını artırır.
+        
+        Returns:
+            int: Display list ID'si
+        """
+        if not self.face_obj:
+            return None
+            
+        # Yeni display list oluştur
+        display_list = glGenLists(1)
+        glNewList(display_list, GL_COMPILE)
+        
+        # Basitleştirilmiş bir yaklaşım - sadece yüz üçgenlerini çizme
+        try:
+            # Işığı ve malzeme özelliklerini ayarla
+            glEnable(GL_LIGHTING)
+            
+            # Ten rengi için malzeme ayarla
+            ambient = [0.2, 0.2, 0.2, 1.0]
+            diffuse = [0.9, 0.8, 0.7, 1.0]  # Ten rengi
+            specular = [0.1, 0.1, 0.1, 1.0]
+            
+            glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, ambient)
+            glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, diffuse)
+            glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, specular)
+            glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 25.0)
+            
+            # Rengi ayarla
+            glColor3f(diffuse[0], diffuse[1], diffuse[2])
+            
+            # Yüz üçgenlerini çiz
+            vertices = self.face_obj.vertices
+            
+            # Tüm meshler için
+            for name, mesh in self.face_obj.meshes.items():
+                # Her bir yüz için
+                for i in range(0, len(mesh.faces)):
+                    # Üçgeni çiz
+                    face = mesh.faces[i]
+                    
+                    if len(face) >= 3:
+                        glBegin(GL_TRIANGLES)
+                        
+                        # Yüz için normal vektörü hesapla
+                        v0 = vertices[face[0]]
+                        v1 = vertices[face[1]]
+                        v2 = vertices[face[2]]
+                        
+                        # İki kenarı hesapla
+                        u = [v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2]]
+                        v = [v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2]]
+                        
+                        # Çapraz çarpım ile normal vektörü hesapla
+                        nx = u[1] * v[2] - u[2] * v[1]
+                        ny = u[2] * v[0] - u[0] * v[2]
+                        nz = u[0] * v[1] - u[1] * v[0]
+                        
+                        # Normal vektörü normalize et
+                        length = math.sqrt(nx*nx + ny*ny + nz*nz)
+                        if length > 0:
+                            nx /= length
+                            ny /= length
+                            nz /= length
+                        
+                        # Normal vektörü ayarla
+                        glNormal3f(nx, ny, nz)
+                        
+                        # Yüzün her köşesi için
+                        for j in range(len(face)):
+                            # Vertex'i çiz
+                            v = vertices[face[j]]
+                            glVertex3f(v[0], v[1], v[2])
+                            
+                        glEnd()
+            
+        except Exception as e:
+            logger.error(f"Error in display list creation: {str(e)}")
+            # Hata durumunda basit bir küre çiz
+            glColor3f(0.9, 0.8, 0.7)  # Ten rengi
+            glutSolidSphere(1.0, 16, 16)
+            
+        glEndList()
+        return display_list
+
 
 class Head3DPanel(QWidget):
     """
-    3D baş duruşu görselleştirme paneli.
-    
-    Bu panel, HeadPoseModelWidget'ını içeren bir konteynırdır.
+    3D yüz modeli ve kontrol panel widget'ı.
     """
     
     def __init__(self, config, parent=None):
         """
-        3D baş modeli panelini başlat.
+        3D yüz modeli panelini oluştur.
         
         Args:
-            config: Yapılandırma sözlüğü
+            config: Yapılandırma ayarları
             parent: Ebeveyn widget
         """
         super().__init__(parent)
         
         self.config = config
         
-        # Layout oluştur
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        # Ana layout
+        layout = QVBoxLayout()
         
-        # Head pose modeli widget'ını oluştur
-        self.model_widget = HeadPoseModelWidget(self, config)
-        layout.addWidget(self.model_widget)
+        # 3D model görüntüleme widget'ı
+        self.head_pose_widget = HeadPoseModelWidget(self, config)
+        layout.addWidget(self.head_pose_widget)
         
-        # Add reset button
-        self.reset_button = QPushButton("Reset View", self)
-        self.reset_button.clicked.connect(self.reset_view)
-        self.reset_button.setStyleSheet("""
-            QPushButton {
-                background-color: #444444;
-                color: white;
-                border: none;
-                padding: 5px;
-                border-radius: 3px;
-                font-size: 10px;
-            }
-            QPushButton:hover {
-                background-color: #555555;
-            }
-            QPushButton:pressed {
-                background-color: #333333;
-            }
-        """)
-        layout.addWidget(self.reset_button)
+        # Kontroller bölümü
+        controls_layout = QVBoxLayout()
         
-        # Add debug visualization toggle
-        self._create_debug_controls()
+        # Reset butonu
+        reset_button = QPushButton("Görünümü Sıfırla")
+        reset_button.clicked.connect(self.reset_view)
+        controls_layout.addWidget(reset_button)
         
-        # Widget görünümünü ayarla
-        self.setStyleSheet("""
-            background-color: #0a0a0a;
-            border: 1px solid #333333;
-            border-radius: 4px;
-        """)
+        # Model seçimi için checkbox
+        if hasattr(self.head_pose_widget, 'face_obj') and self.head_pose_widget.face_obj:
+            self.model_toggle = QCheckBox("Gerçekçi 3D Model Kullan")
+            self.model_toggle.setChecked(self.head_pose_widget.use_obj_model)
+            self.model_toggle.toggled.connect(self._toggle_model)
+            controls_layout.addWidget(self.model_toggle)
         
-        # Panel boyutunu ayarla - biraz daha yüksek olması gerekiyor (buton ve debug için)
-        self.setFixedSize(200, 260)
+        # Debug gösterimi için checkbox
+        debug_toggle = QCheckBox("Debug Bilgilerini Göster")
+        debug_toggle.setChecked(False)
+        debug_toggle.toggled.connect(self._toggle_debug_info)
+        controls_layout.addWidget(debug_toggle)
+        
+        # Eksenler için checkbox
+        axes_toggle = QCheckBox("Eksenleri Göster")
+        axes_toggle.setChecked(self.head_pose_widget.axes_enabled)
+        axes_toggle.toggled.connect(lambda checked: setattr(self.head_pose_widget, 'axes_enabled', checked))
+        controls_layout.addWidget(axes_toggle)
+        
+        # Grid için checkbox
+        grid_toggle = QCheckBox("Grid Göster")
+        grid_toggle.setChecked(self.head_pose_widget.show_grid)
+        grid_toggle.toggled.connect(lambda checked: setattr(self.head_pose_widget, 'show_grid', checked))
+        controls_layout.addWidget(grid_toggle)
+        
+        layout.addLayout(controls_layout)
+        
+        # Generate debug controls if needed 
+        # To be implemented
+        
+        self.setLayout(layout)
         
         logger.debug("Head3DPanel initialized")
     
-    def _create_debug_controls(self):
-        """Create debug controls for developers"""
-        self.debug_checkbox = QCheckBox("Show Debug Info", self)
-        self.debug_checkbox.setChecked(False)
-        self.debug_checkbox.toggled.connect(self._toggle_debug_info)
-        self.debug_checkbox.setStyleSheet("""
-            QCheckBox {
-                color: white;
-                font-size: 10px;
-            }
-            QCheckBox::indicator {
-                width: 12px;
-                height: 12px;
-            }
-        """)
-        self.layout().addWidget(self.debug_checkbox)
+    def _toggle_model(self, checked):
+        """
+        3D model tipini değiştir.
+        
+        Args:
+            checked: True ise gerçekçi OBJ model, False ise basit geometrik model
+        """
+        if self.head_pose_widget:
+            self.head_pose_widget.use_obj_model = checked
+            self.head_pose_widget.update()
     
     def _toggle_debug_info(self, checked):
-        """Toggle debug information display"""
-        if hasattr(self, 'model_widget'):
-            self.model_widget.show_debug_info = checked
-            self.model_widget.update()
-            logger.debug(f"Debug visualization {'enabled' if checked else 'disabled'}")
+        """
+        Debug bilgisi gösterimini aç/kapat.
+        
+        Args:
+            checked: True ise debug bilgisi göster, False ise gizle
+        """
+        if self.head_pose_widget:
+            self.head_pose_widget.show_debug_info = checked
+            self.head_pose_widget.update()
     
     def reset_view(self):
-        """Reset the model to default orientation"""
-        if hasattr(self, 'model_widget'):
-            self.model_widget.pitch = 0.0
-            self.model_widget.yaw = 0.0
-            self.model_widget.roll = 0.0
-            self.model_widget.x_trans = 0.0
-            self.model_widget.y_trans = 0.0
-            self.model_widget.z_trans = -5.0
-            
-            # Clear history and reset target angles
-            self.model_widget.pitch_history.clear()
-            self.model_widget.yaw_history.clear()
-            self.model_widget.roll_history.clear()
-            
-            # Re-initialize history with zeros
-            for _ in range(self.model_widget.history_size):
-                self.model_widget.pitch_history.append(0.0)
-                self.model_widget.yaw_history.append(0.0)
-                self.model_widget.roll_history.append(0.0)
-                
-            # Reset target angles
-            self.model_widget.target_pitch = 0.0
-            self.model_widget.target_yaw = 0.0
-            self.model_widget.target_roll = 0.0
-            
-            self.model_widget.update()
-            logger.debug("3D model view reset")
-            
+        """Kamera konumunu sıfırla"""
+        if self.head_pose_widget:
+            self.head_pose_widget.reset_view()
+    
     def update_pose(self, pitch, yaw, roll):
         """
         Head pose açılarını güncelle.
@@ -947,4 +1195,5 @@ class Head3DPanel(QWidget):
             yaw: Y-ekseni etrafında dönüş (derece)
             roll: Z-ekseni etrafında dönüş (derece)
         """
-        self.model_widget.update_pose(pitch, yaw, roll)
+        if self.head_pose_widget:
+            self.head_pose_widget.update_pose(pitch, yaw, roll)
