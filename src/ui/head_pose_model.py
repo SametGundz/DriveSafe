@@ -10,7 +10,7 @@ görselleştiren bir widget sağlar.
 
 import numpy as np
 import os
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QPushButton, QCheckBox, QSlider, QLabel, QHBoxLayout
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QPushButton, QCheckBox, QSlider, QLabel, QHBoxLayout, QSizePolicy
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QSurfaceFormat
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
@@ -462,8 +462,8 @@ class HeadPoseModelWidget(QOpenGLWidget):
                 logger.error(f"Error initializing GLUT: {str(glut_error)}")
                 self.glut_initialized = False
                 
-            # Arka plan rengini ayarla (hafif gri tonunda)
-            glClearColor(0.95, 0.95, 0.95, 1.0)
+            # Arka plan rengini ayarla (koyu gri tonda)
+            glClearColor(0.15, 0.15, 0.15, 1.0)
             
             # Derinlik testi etkinleştir
             glEnable(GL_DEPTH_TEST)
@@ -477,17 +477,28 @@ class HeadPoseModelWidget(QOpenGLWidget):
             # Yumuşak gölgeleme etkinleştir (flat shading yerine smooth shading)
             glShadeModel(GL_SMOOTH)
             
-            # Işık pozisyonu ve özellikleri
-            light_position = [10.0, 10.0, 10.0, 1.0]  # Sağ üst köşeden gelen ışık
+            # Işık pozisyonu ve özellikleri - daha yumuşak ışıklar için güncellenmiş değerler
+            light_position = [5.0, 5.0, 5.0, 1.0]  # Yukarıdan ve önden gelen ışık
             glLightfv(GL_LIGHT0, GL_POSITION, light_position)
             
-            # Ortam ışığı ayarla (hafif mavi tonu)
-            ambient_light = [0.2, 0.2, 0.22, 1.0]
+            # Ortam ışığı ayarla (daha düşük ton)
+            ambient_light = [0.2, 0.2, 0.2, 1.0]
             glLightfv(GL_LIGHT0, GL_AMBIENT, ambient_light)
             
-            # Yayılan ışık ayarla (beyaz)
-            diffuse_light = [0.8, 0.8, 0.8, 1.0]
+            # Yayılan ışık ayarla (daha yumuşak beyaz)
+            diffuse_light = [0.6, 0.6, 0.6, 1.0]
             glLightfv(GL_LIGHT0, GL_DIFFUSE, diffuse_light)
+            
+            # Speküler ışık (modelin parlak noktalarını azaltmak için)
+            specular_light = [0.3, 0.3, 0.3, 1.0]
+            glLightfv(GL_LIGHT0, GL_SPECULAR, specular_light)
+            
+            # İkinci bir ışık kaynağı (daha yumuşak dolgu ışığı)
+            glEnable(GL_LIGHT1)
+            light1_position = [-5.0, -2.0, 5.0, 1.0]  # Aşağıdan ve arkadan gelen ışık
+            glLightfv(GL_LIGHT1, GL_POSITION, light1_position)
+            glLightfv(GL_LIGHT1, GL_AMBIENT, [0.05, 0.05, 0.05, 1.0])
+            glLightfv(GL_LIGHT1, GL_DIFFUSE, [0.3, 0.3, 0.3, 1.0])
             
             # OBJ modeli için doku ve display list oluştur
             if self.use_obj_model and self.face_obj:
@@ -607,13 +618,7 @@ class HeadPoseModelWidget(QOpenGLWidget):
                     elif part['type'] == 'cylinder':
                         self._draw_cylinder(part)
             
-            # Head pose bilgilerini göster - daha okunaklı metin düzeni
-            # Ekranın sol üst köşesinde göster
-            self._draw_text(f"Pitch (X): {self.pitch:.1f}°", -1.5, 1.5, 0)
-            self._draw_text(f"Yaw (Y): {self.yaw:.1f}°", -1.5, 1.3, 0)
-            self._draw_text(f"Roll (Z): {self.roll:.1f}°", -1.5, 1.1, 0)
-            
-            # Show debug info if enabled
+            # Debug bilgilerini göster eğer etkinse
             if hasattr(self, 'show_debug_info') and self.show_debug_info:
                 self._draw_debug_info()
                 
@@ -652,22 +657,6 @@ class HeadPoseModelWidget(QOpenGLWidget):
             glVertex3f(0.0, 0.0, axis_length)
             
             glEnd()
-            
-            # Eksen etiketlerini çiz
-            glColor3f(1.0, 0.0, 0.0)  # Kırmızı
-            self._draw_text("X", axis_length * 1.1, 0, 0)
-            
-            glColor3f(0.0, 1.0, 0.0)  # Yeşil
-            self._draw_text("Y", 0, axis_length * 1.1, 0)
-            
-            glColor3f(0.0, 0.0, 1.0)  # Mavi
-            self._draw_text("Z", 0, 0, axis_length * 1.1)
-            
-            # Hareket eksenlerini açıklayıcı metin
-            glColor3f(0.7, 0.7, 0.7)  # Gri
-            self._draw_text("Pitch", axis_length * 0.5, -0.2, 0)
-            self._draw_text("Yaw", -0.2, axis_length * 0.5, 0)
-            self._draw_text("Roll", -0.2, 0, axis_length * 0.5)
             
             # Varsayılan değerlere geri dön
             glLineWidth(1.0)
@@ -795,9 +784,9 @@ class HeadPoseModelWidget(QOpenGLWidget):
                 yaw = yaw
                 roll = -roll  # roll'un işareti değişir
             else:
-                # Normalde işaretlerin ayarlanması
-                pitch = -pitch  # Pitch işareti tersine çevrilir 
-                yaw = -yaw     # Yaw işareti tersine çevrilir
+                # Normalde işaretlerin ayarlanması 
+                pitch = -pitch  # Pitch işareti tersine çevrilir
+                yaw = yaw      # Yaw işaretini korunuyor - ayna efektini düzeltmek için
                 # roll işareti korunuyor
             
             # Değerleri sınırla (aşırı rotasyonları engelle)
@@ -958,7 +947,7 @@ class HeadPoseModelWidget(QOpenGLWidget):
         self.update()  # Widget'ı yeniden çiz
     
     def reset_view(self):
-        """Kamera görünümünü ve modeli sıfırla."""
+        """Kamera konumunu sıfırla"""
         # Pozisyon ve rotasyonu sıfırla
         self.pitch = 0.0
         self.yaw = 0.0
@@ -996,27 +985,84 @@ class HeadPoseModelWidget(QOpenGLWidget):
         logger.debug("3D model view reset")
 
     def _draw_debug_info(self):
-        """Draw technical debug information"""
+        """Debug bilgilerini sağ üst köşede sabit bir konumda göster"""
         glDisable(GL_LIGHTING)
         
-        # Draw raw values from MediaPipe
-        glColor3f(1.0, 0.8, 0.2)  # Amber color for debug info
-        self._draw_text(f"Raw Pitch: {self.raw_pitch:.1f}°", -1.5, -1.3, 0)
-        self._draw_text(f"Raw Yaw: {self.raw_yaw:.1f}°", -1.5, -1.5, 0)
-        self._draw_text(f"Raw Roll: {self.raw_roll:.1f}°", -1.5, -1.7, 0)
+        # Ortogonal projeksiyon kullan - 2D çizim için
+        glMatrixMode(GL_PROJECTION)
+        glPushMatrix()
+        glLoadIdentity()
         
-        # Scale factors for each axis
-        base_scale = 2.0  # From dynamic_scale function
-        self._draw_text(f"Scale Factor: {base_scale:.1f}x", -1.5, -1.9, 0)
+        # Ekran boyutlarını kullan
+        glOrtho(0, self.width(), self.height(), 0, -1, 1)
         
-        # Draw frame rate
-        now = time.time()
-        if hasattr(self, '_last_frame_time') and self._last_frame_time > 0:
-            fps = 1.0 / (now - self._last_frame_time) if now > self._last_frame_time else 0
-            self._draw_text(f"FPS: {fps:.1f}", -1.5, -2.1, 0)
-        self._last_frame_time = now
+        # Viewport koordinatları kullan
+        glMatrixMode(GL_MODELVIEW)
+        glPushMatrix()
+        glLoadIdentity()
+        
+        # 2D yüzey için derinlik testini devre dışı bırak
+        glDisable(GL_DEPTH_TEST)
+        
+        # Panel boyutları
+        margin = 10  # Kenar boşluğu
+        line_height = 18  # Satır yüksekliği
+        line_count = 3  # Toplam satır sayısı (sadece açı değerleri)
+        box_width = 120  # Kutu genişliği - biraz daraltıldı
+        box_height = line_count * line_height + margin * 2  # Kutu yüksekliği
+        
+        # Sağ üst köşe pozisyonu hesapla
+        right_x = self.width() - box_width - margin
+        
+        # Yarı saydam bir arka plan kutusu çiz
+        glColor4f(0.0, 0.0, 0.0, 0.8)  # Siyah, %80 opak
+        
+        glBegin(GL_QUADS)
+        glVertex2f(right_x, margin)
+        glVertex2f(right_x + box_width, margin)
+        glVertex2f(right_x + box_width, margin + box_height)
+        glVertex2f(right_x, margin + box_height)
+        glEnd()
+        
+        # Debug metinlerini çiz
+        glColor3f(1.0, 0.8, 0.2)  # Amber rengi metin
+        
+        x = right_x + 10  # Sağ kenara göre metin konumu
+        y = margin + line_height  # Üst kenardan metin konumu
+        
+        # Güncel açı değerlerini göster
+        self._draw_text_2d(f"Pitch: {self.pitch:.1f}°", x, y)
+        y += line_height
+        self._draw_text_2d(f"Yaw: {self.yaw:.1f}°", x, y)
+        y += line_height
+        self._draw_text_2d(f"Roll: {self.roll:.1f}°", x, y)
+        
+        # 3D görünüme geri dön
+        glEnable(GL_DEPTH_TEST)
+        glMatrixMode(GL_PROJECTION)
+        glPopMatrix()
+        glMatrixMode(GL_MODELVIEW)
+        glPopMatrix()
         
         glEnable(GL_LIGHTING)
+    
+    def _draw_text_2d(self, text, x, y):
+        """
+        2D ekran koordinatlarında metin çiz.
+        
+        Args:
+            text: Gösterilecek metin
+            x, y: Ekran koordinatları
+        """
+        glRasterPos2f(x, y)
+        
+        # Sadece GLUT başlatıldıysa metin göster
+        if hasattr(self, 'glut_initialized') and self.glut_initialized:
+            try:
+                for c in text:
+                    glutBitmapCharacter(GLUT_BITMAP_HELVETICA_12, ord(c))
+            except Exception as e:
+                logger.debug(f"Error rendering text with GLUT: {str(e)}")
 
     def _load_texture(self):
         """
@@ -1199,7 +1245,7 @@ class HeadPoseModelWidget(QOpenGLWidget):
 
 class Head3DPanel(QWidget):
     """
-    3D yüz modeli ve kontrol panel widget'ı.
+    3D yüz modeli widget'ı.
     """
     
     def __init__(self, config, parent=None):
@@ -1214,144 +1260,37 @@ class Head3DPanel(QWidget):
         
         self.config = config
         
-        # Ana layout
-        layout = QVBoxLayout()
-        
+        # Layout ekle
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)  # Dış boşlukları kaldır
+        layout.setSpacing(5)  # Minimal boşluk
+
         # 3D model görüntüleme widget'ı
         self.head_pose_widget = HeadPoseModelWidget(self, config)
+        # OBJ modeli her zaman kullanacak şekilde ayarla
+        if hasattr(self.head_pose_widget, 'use_obj_model'):
+            self.head_pose_widget.use_obj_model = True
+            
+        # Widget'ın boyut politikasını genişleyen olarak ayarla
+        self.head_pose_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        # Minimum boyutu küçült, layout'ın genişlik dağılımına daha iyi uyum sağlaması için
+        self.head_pose_widget.setMinimumSize(300, 300)
         layout.addWidget(self.head_pose_widget)
+        
+        # Reset butonu kaldırıldı - artık sağ taraftaki kontrol panelinde
         
         # Varsayılan ölçek değeri
         if not hasattr(self.head_pose_widget, 'user_scale'):
             self.head_pose_widget.user_scale = 1.0
         
-        # Kontroller bölümü
-        controls_layout = QVBoxLayout()
-        
-        # Reset butonu
-        reset_button = QPushButton("Görünümü Sıfırla")
-        reset_button.clicked.connect(self.reset_view)
-        controls_layout.addWidget(reset_button)
-        
-        # Model seçimi için checkbox
-        if hasattr(self.head_pose_widget, 'face_obj') and self.head_pose_widget.face_obj:
-            self.model_toggle = QCheckBox("Gerçekçi 3D Model Kullan")
-            self.model_toggle.setChecked(self.head_pose_widget.use_obj_model)
-            self.model_toggle.toggled.connect(self._toggle_model)
-            controls_layout.addWidget(self.model_toggle)
-        
-        # Model boyutu kontrolü için slider
-        scale_layout = QHBoxLayout()
-        scale_label = QLabel("Model Boyutu:")
-        scale_layout.addWidget(scale_label)
-        
-        self.scale_slider = QSlider(Qt.Orientation.Horizontal)
-        self.scale_slider.setMinimum(50)  # 0.5x
-        self.scale_slider.setMaximum(200)  # 2.0x
-        self.scale_slider.setValue(100)  # 1.0x (varsayılan)
-        self.scale_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
-        self.scale_slider.setTickInterval(25)
-        self.scale_slider.valueChanged.connect(self._on_scale_changed)
-        scale_layout.addWidget(self.scale_slider)
-        
-        self.scale_value_label = QLabel("1.0x")
-        scale_layout.addWidget(self.scale_value_label)
-        
-        controls_layout.addLayout(scale_layout)
-        
-        # Model oryantasyonu kontrolü
-        orientation_layout = QHBoxLayout()
-        orientation_label = QLabel("Model Yönü:")
-        orientation_layout.addWidget(orientation_label)
-        
-        # Model yönünü değiştiren checkbox
-        self.orientation_toggle = QCheckBox("Gerçek Baş Hareketlerini Takip Et")
-        self.orientation_toggle.setChecked(self.head_pose_widget.model_flip if hasattr(self.head_pose_widget, 'model_flip') else False)
-        self.orientation_toggle.toggled.connect(self._toggle_orientation)
-        orientation_layout.addWidget(self.orientation_toggle)
-        
-        controls_layout.addLayout(orientation_layout)
-        
-        # Debug gösterimi için checkbox
-        debug_toggle = QCheckBox("Debug Bilgilerini Göster")
-        debug_toggle.setChecked(False)
-        debug_toggle.toggled.connect(self._toggle_debug_info)
-        controls_layout.addWidget(debug_toggle)
-        
-        # Eksenler için checkbox
-        axes_toggle = QCheckBox("Eksenleri Göster")
-        axes_toggle.setChecked(self.head_pose_widget.axes_enabled)
-        axes_toggle.toggled.connect(lambda checked: setattr(self.head_pose_widget, 'axes_enabled', checked))
-        controls_layout.addWidget(axes_toggle)
-        
-        # Grid için checkbox
-        grid_toggle = QCheckBox("Grid Göster")
-        grid_toggle.setChecked(self.head_pose_widget.show_grid)
-        grid_toggle.toggled.connect(lambda checked: setattr(self.head_pose_widget, 'show_grid', checked))
-        controls_layout.addWidget(grid_toggle)
-        
-        layout.addLayout(controls_layout)
-        
         self.setLayout(layout)
         
         logger.debug("Head3DPanel initialized")
-    
-    def _on_scale_changed(self, value):
-        """
-        Slider değeri değiştiğinde model ölçeğini güncelle.
-        
-        Args:
-            value: Slider değeri (50-200 arası)
-        """
-        # Slider değerini 0.5-2.0 aralığına dönüştür
-        scale_value = value / 100.0
-        self.scale_value_label.setText(f"{scale_value:.1f}x")
-        
-        # Model ölçeğini güncelle
-        if hasattr(self.head_pose_widget, 'set_user_scale'):
-            self.head_pose_widget.set_user_scale(scale_value)
-    
-    def _toggle_model(self, checked):
-        """
-        3D model tipini değiştir.
-        
-        Args:
-            checked: True ise gerçekçi OBJ model, False ise basit geometrik model
-        """
-        if self.head_pose_widget:
-            self.head_pose_widget.use_obj_model = checked
-            self.head_pose_widget.update()
-    
-    def _toggle_orientation(self, checked):
-        """
-        Model yönünü değiştir.
-        
-        Args:
-            checked: True ise modeli çevir (gerçek baş hareketlerini takip et), 
-                    False ise normal görünüm
-        """
-        if hasattr(self.head_pose_widget, 'toggle_model_orientation'):
-            self.head_pose_widget.toggle_model_orientation(checked)
-    
-    def _toggle_debug_info(self, checked):
-        """
-        Debug bilgisi gösterimini aç/kapat.
-        
-        Args:
-            checked: True ise debug bilgisi göster, False ise gizle
-        """
-        if self.head_pose_widget:
-            self.head_pose_widget.show_debug_info = checked
-            self.head_pose_widget.update()
     
     def reset_view(self):
         """Kamera konumunu sıfırla"""
         if self.head_pose_widget:
             self.head_pose_widget.reset_view()
-            
-            # Slider'ı da sıfırla
-            if hasattr(self, 'scale_slider'):
-                self.scale_slider.setValue(100)
     
     def update_pose(self, pitch, yaw, roll):
         """
@@ -1364,3 +1303,31 @@ class Head3DPanel(QWidget):
         """
         if self.head_pose_widget:
             self.head_pose_widget.update_pose(pitch, yaw, roll)
+            
+    def set_user_scale(self, scale_value):
+        """Model ölçeğini ayarla."""
+        if hasattr(self.head_pose_widget, 'set_user_scale'):
+            self.head_pose_widget.set_user_scale(scale_value)
+            
+    def toggle_model_orientation(self, checked):
+        """Model yönünü değiştir."""
+        if hasattr(self.head_pose_widget, 'toggle_model_orientation'):
+            self.head_pose_widget.toggle_model_orientation(checked)
+            
+    def set_debug_info(self, checked):
+        """Debug bilgilerini göster/gizle."""
+        if self.head_pose_widget:
+            self.head_pose_widget.show_debug_info = checked
+            self.head_pose_widget.update()
+            
+    def set_axes_visible(self, checked):
+        """Eksenleri göster/gizle."""
+        if hasattr(self.head_pose_widget, 'axes_enabled'):
+            self.head_pose_widget.axes_enabled = checked
+            self.head_pose_widget.update()
+            
+    def set_grid_visible(self, checked):
+        """Grid göster/gizle."""
+        if hasattr(self.head_pose_widget, 'show_grid'):
+            self.head_pose_widget.show_grid = checked
+            self.head_pose_widget.update()

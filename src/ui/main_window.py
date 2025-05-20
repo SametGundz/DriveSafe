@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 import numpy as np
 
-from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QStatusBar, QLabel, QSizePolicy
+from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QStatusBar, QLabel, QSizePolicy, QSlider, QCheckBox, QPushButton
 from PyQt6.QtCore import Qt, QTimer, QSize
 from PyQt6.QtGui import QFont, QPixmap, QImage
 
@@ -228,12 +228,18 @@ class DriverDrowsinessMainWindow(QMainWindow):
         )
         main_layout.setSpacing(self.config['layout']['spacing'])
         
-        # Top area (video + stats + 3D model)
+        # Top area (video + 3D model + stats)
         top_layout = QHBoxLayout()
         top_layout.setContentsMargins(0, 0, 0, 0)
-        top_layout.setSpacing(10)  # Panel arasında yeterli boşluk bırak
+        top_layout.setSpacing(5)  # Paneller arasında daha az boşluk
         
-        # Video panel layoutu - başlık olmadan direkt paneli ekle
+        # Üst layout'un ağırlıklarını eşit ayarla
+        top_layout.setStretch(0, 1)  # Video paneli ağırlığı
+        top_layout.setStretch(1, 1)  # 3D model ağırlığı
+        top_layout.setStretch(2, 1)  # Metrik ve kontrol paneli ağırlığı
+        
+        # ----- SOL BÖLGE: VİDEO PANEL -----
+        # Video panel layoutu
         video_container = QVBoxLayout()
         
         # Video panel
@@ -243,35 +249,127 @@ class DriverDrowsinessMainWindow(QMainWindow):
         # Sol tarafta video paneli için bir container widget oluştur ve hizalamayı ayarla
         video_widget = QWidget()
         video_widget.setLayout(video_container)
-        video_widget.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
-        top_layout.addWidget(video_widget, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        video_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        # Stretch faktörünü 1 olarak ayarla (sabit genişlik oranı)
+        top_layout.addWidget(video_widget, 1)
         
-        # 3D Head Pose modeli ekleme
-        from src.ui.head_pose_model import Head3DPanel
+        # ----- MERKEZ BÖLGE: 3D HEAD POSE MODEL -----
+        from src.ui.head_pose_model import Head3DPanel, HeadPoseModelWidget
+        
+        # 3D modelin kontrolleri için widget ve layout oluştur
         self.head_pose_panel = Head3DPanel(self.config)
-        top_layout.addWidget(self.head_pose_panel, 0, Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignTop)
+        # 3D modelin ana bölgede olması için boyut ayarlarını düzenle
+        self.head_pose_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        # Merkezi bölgede 3D model için bir container oluştur
+        model_container = QVBoxLayout()
+        model_container.addWidget(self.head_pose_panel)
+        model_widget = QWidget()
+        model_widget.setLayout(model_container)
+        model_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        # Stretch faktörünü 1 olarak ayarla (sabit genişlik oranı)
+        top_layout.addWidget(model_widget, 1)
         
-        # Metrikler ve video paneli arasında az bir esnek alan ekle
-        top_layout.addStretch(1)  # Float değil integer kullan
-        
-        # Metrics panel layoutu - başlık olmadan direkt paneli ekle
-        metrics_container = QVBoxLayout()
+        # ----- SAĞ BÖLGE: METRİK PANEL ve 3D KONTROLLER -----
+        # Düzen değişikliği - 3D model kontrollerinin metrik barlarının altında olmasını sağlayacak
+        right_container = QVBoxLayout()
+        right_container.setContentsMargins(0, 0, 0, 0)
+        right_container.setSpacing(10)
         
         # Metrics panel
         self.metrics_panel = MetricsPanel(self.config)
-        metrics_container.addWidget(self.metrics_panel)
+        # Daha kompakt bir görünüm için boyut politikasını ayarla
+        self.metrics_panel.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        right_container.addWidget(self.metrics_panel)
         
-        # Sağ tarafta metrikler paneli için bir container widget oluştur ve hizalamayı ayarla
-        metrics_widget = QWidget()
-        metrics_widget.setLayout(metrics_container)
-        metrics_widget.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
-        top_layout.addWidget(metrics_widget, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+        # ----- 3D MODEL KONTROL PANEL -----
+        # 3D model kontrolleri için yeni widget oluştur
+        from src.ui.head_pose_model import Head3DPanel
         
-        main_layout.addLayout(top_layout)
+        # SADECE kontrol paneli için bir wrapper widget oluştur
+        control_wrapper = QWidget()
+        control_wrapper.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        # Sabit genişlik sınırlamasını kaldır
         
-        # Kontrol paneli - başlık olmadan direkt panel ekle
+        # 3D model kontrol panel bilgilerini al ve kontrol panele yerleştir
+        control_layout = QVBoxLayout(control_wrapper)
+        control_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Model boyutu kontrolü
+        scale_widget = QWidget()
+        scale_layout = QVBoxLayout(scale_widget)
+        scale_layout.setContentsMargins(0, 5, 0, 5)
+        
+        scale_label = QLabel("Model Boyutu:")
+        scale_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        scale_layout.addWidget(scale_label)
+        
+        scale_slider_layout = QHBoxLayout()
+        self.model_scale_slider = QSlider(Qt.Orientation.Horizontal)
+        self.model_scale_slider.setMinimum(50)  # 0.5x
+        self.model_scale_slider.setMaximum(200)  # 2.0x
+        self.model_scale_slider.setValue(100)  # 1.0x (varsayılan)
+        self.model_scale_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.model_scale_slider.setTickInterval(25)
+        scale_slider_layout.addWidget(self.model_scale_slider)
+        
+        self.scale_value_label = QLabel("1.0x")
+        self.scale_value_label.setFixedWidth(40)
+        self.scale_value_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        scale_slider_layout.addWidget(self.scale_value_label)
+        
+        scale_layout.addLayout(scale_slider_layout)
+        control_layout.addWidget(scale_widget)
+        
+        # "Görünümü Sıfırla" butonu
+        reset_button = QPushButton("Görünümü Sıfırla")
+        reset_button.clicked.connect(lambda: self.head_pose_panel.reset_view())
+        reset_button.setStyleSheet("font-weight: bold; padding: 8px; margin-top: 8px;")
+        control_layout.addWidget(reset_button)
+        
+        # Görselleştirme ayarları
+        viz_widget = QWidget()
+        viz_layout = QVBoxLayout(viz_widget)
+        viz_layout.setContentsMargins(0, 5, 0, 5)
+        
+        viz_label = QLabel("Görselleştirme Ayarları:")
+        viz_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        viz_layout.addWidget(viz_label)
+        
+        # Debug gösterimi için checkbox
+        self.debug_toggle = QCheckBox("Debug Bilgilerini Göster")
+        self.debug_toggle.setChecked(False)
+        viz_layout.addWidget(self.debug_toggle)
+        
+        # Eksenler için checkbox
+        self.axes_toggle = QCheckBox("Eksenleri Göster")
+        self.axes_toggle.setChecked(True)  # Varsayılan olarak true
+        viz_layout.addWidget(self.axes_toggle)
+        
+        # Grid için checkbox
+        self.grid_toggle = QCheckBox("Grid Göster")
+        self.grid_toggle.setChecked(False)  # Varsayılan olarak false
+        viz_layout.addWidget(self.grid_toggle)
+        
+        control_layout.addWidget(viz_widget)
+        
+        # Kontrol panelini sağ tarafa ekle
+        right_container.addWidget(control_wrapper)
+        
+        # Sağ taraf widget'ı
+        right_widget = QWidget()
+        right_widget.setLayout(right_container)
+        right_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        # Stretch faktörünü 1 olarak ayarla (sabit genişlik oranı)
+        top_layout.addWidget(right_widget, 1)
+        
+        # Yatay boşluğu azalt
+        top_layout.setSpacing(5)
+        
+        main_layout.addLayout(top_layout, 1)  # Top area should take more space
+        
+        # Kontrol paneli - daha kompakt bir görünüm için
         self.control_panel = ControlPanel(self.config)
-        main_layout.addWidget(self.control_panel)
+        main_layout.addWidget(self.control_panel, 0)  # Bottom control panel should take less space
         
         # Connect control panel signals
         self.control_panel.start_clicked.connect(self.on_start)
@@ -284,7 +382,15 @@ class DriverDrowsinessMainWindow(QMainWindow):
         
         # Grafik paneli - başlık olmadan direkt paneli ekle
         self.chart_panel = ChartPanel(self.config)
-        main_layout.addWidget(self.chart_panel)
+        main_layout.addWidget(self.chart_panel, 0)  # Chart panel should take less space
+        
+        # Kontrol wrapper sinyal bağlantıları
+        # Model boyutu slideri
+        self.model_scale_slider.valueChanged.connect(self._on_model_scale_changed)
+        # Görselleştirme kontrolleri
+        self.debug_toggle.toggled.connect(self._on_debug_toggle)
+        self.axes_toggle.toggled.connect(self._on_axes_toggle)
+        self.grid_toggle.toggled.connect(self._on_grid_toggle)
     
     def showEvent(self, event):
         """Handle window show event - maximize after UI is fully initialized."""
@@ -795,6 +901,32 @@ class DriverDrowsinessMainWindow(QMainWindow):
         
         # Orijinal closeEvent çağrı
         event.accept()
+
+    # 3D model sinyal bağlantıları için metodlar
+    def _on_model_scale_changed(self, value):
+        """Model ölçek faktörünü değiştir."""
+        if hasattr(self, 'head_pose_panel'):
+            # Ölçeği 0.5-2.0 aralığına dönüştür
+            scale_value = value / 100.0
+            self.scale_value_label.setText(f"{scale_value:.1f}x")
+            
+            # Model ölçeğini güncelle
+            self.head_pose_panel.set_user_scale(scale_value)
+    
+    def _on_debug_toggle(self, checked):
+        """Debug bilgilerini göster/gizle."""
+        if hasattr(self, 'head_pose_panel'):
+            self.head_pose_panel.set_debug_info(checked)
+    
+    def _on_axes_toggle(self, checked):
+        """Eksenleri göster/gizle."""
+        if hasattr(self, 'head_pose_panel'):
+            self.head_pose_panel.set_axes_visible(checked)
+    
+    def _on_grid_toggle(self, checked):
+        """Grid göster/gizle."""
+        if hasattr(self, 'head_pose_panel'):
+            self.head_pose_panel.set_grid_visible(checked)
 
 
 def main():
