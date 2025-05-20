@@ -62,53 +62,76 @@ class HeadPoseEstimator:
             angles: Tuple of (pitch, yaw, roll) angles in degrees
         """
         # If no landmarks are detected, return default values
-        if not landmarks:
+        if not landmarks or len(landmarks) < max(self.HEAD_POSE_LANDMARKS) + 1:
             return frame, (0.0, 0.0, 0.0)
+        
+        try:    
+            # Calculate camera matrix from frame dimensions
+            h, w = frame.shape[:2]
+            focal_length = w
+            center = (w / 2, h / 2)
+            camera_matrix = np.array(
+                [[focal_length, 0, center[0]],
+                [0, focal_length, center[1]],
+                [0, 0, 1]], dtype=np.float64
+            )
+            distortion = np.zeros((4, 1), dtype=np.float64)
             
-        # Calculate camera matrix from frame dimensions
-        h, w = frame.shape[:2]
-        focal_length = w
-        center = (w / 2, h / 2)
-        camera_matrix = np.array(
-            [[focal_length, 0, center[0]],
-             [0, focal_length, center[1]],
-             [0, 0, 1]], dtype=np.float64
-        )
-        distortion = np.zeros((4, 1), dtype=np.float64)
-        
-        # Extract 2D positions of the landmarks used for head pose
-        face_coordinates = []
-        for idx in self.HEAD_POSE_LANDMARKS:
-            if idx < len(landmarks):
-                x, y = landmarks[idx][0], landmarks[idx][1]
-                face_coordinates.append([x, y])
-        
-        # If we don't have all the required landmarks, return default values
-        if len(face_coordinates) != len(self.HEAD_POSE_LANDMARKS):
+            # Extract 2D positions of the landmarks used for head pose
+            face_coordinates = []
+            invalid_landmarks = False
+            
+            for idx in self.HEAD_POSE_LANDMARKS:
+                if idx < len(landmarks):
+                    if isinstance(landmarks[idx], list) and len(landmarks[idx]) >= 2:
+                        x, y = landmarks[idx][0], landmarks[idx][1]
+                        # Validate coordinates are within frame bounds and not NaN
+                        if (0 <= x < w and 0 <= y < h and 
+                            not np.isnan(x) and not np.isnan(y)):
+                            face_coordinates.append([x, y])
+                        else:
+                            invalid_landmarks = True
+                            break
+                else:
+                    invalid_landmarks = True
+                    break
+            
+            # If we don't have all the required landmarks or they are invalid, return default values
+            if invalid_landmarks or len(face_coordinates) != len(self.HEAD_POSE_LANDMARKS):
+                return frame, (0.0, 0.0, 0.0)
+            
+            face_coordinates = np.array(face_coordinates, dtype=np.float64)
+            
+            # Solve the PnP problem to get rotation and translation vectors
+            ret, rvec, tvec = cv2.solvePnP(
+                self.MODEL_POINTS, 
+                face_coordinates, 
+                camera_matrix, 
+                distortion,
+                flags=cv2.SOLVEPNP_ITERATIVE
+            )
+            
+            if not ret:
+                return frame, (0.0, 0.0, 0.0)
+            
+            # Convert rotation vector to rotation matrix
+            rotation_matrix, _ = cv2.Rodrigues(rvec)
+            
+            # Calculate Euler angles from rotation matrix
+            angles = self.rotation_matrix_to_angles(rotation_matrix)
+            
+            return frame, angles
+            
+        except Exception as e:
+            # Log error and return default values
+            print(f"Error in head pose calculation: {str(e)}")
             return frame, (0.0, 0.0, 0.0)
-        
-        face_coordinates = np.array(face_coordinates, dtype=np.float64)
-        
-        # Solve the PnP problem to get rotation and translation vectors
-        ret, rvec, tvec = cv2.solvePnP(
-            self.MODEL_POINTS, 
-            face_coordinates, 
-            camera_matrix, 
-            distortion,
-            flags=cv2.SOLVEPNP_ITERATIVE
-        )
-        
-        # Convert rotation vector to rotation matrix
-        rotation_matrix, _ = cv2.Rodrigues(rvec)
-        
-        # Calculate Euler angles from rotation matrix
-        angles = self.rotation_matrix_to_angles(rotation_matrix)
-        
-        return frame, angles
     
     def rotation_matrix_to_angles(self, rotation_matrix: np.ndarray) -> Tuple[float, float, float]:
         """
-        Convert a rotation matrix to Euler angles (pitch, yaw, roll).
+        Convert a rotation matrix to Euler angles (pitch, yaw, roll) using a more robust method.
+        
+        This implementation handles singularities (gimbal lock) better than the basic method.
         
         Args:
             rotation_matrix: 3x3 rotation matrix
@@ -116,17 +139,47 @@ class HeadPoseEstimator:
         Returns:
             Tuple of (pitch, yaw, roll) angles in degrees
         """
-        # Extract Euler angles from rotation matrix
-        # X rotation (pitch)
-        x = math.atan2(rotation_matrix[2, 1], rotation_matrix[2, 2])
-        # Y rotation (yaw)
-        y = math.atan2(-rotation_matrix[2, 0], math.sqrt(rotation_matrix[0, 0] ** 2 +
-                                                        rotation_matrix[1, 0] ** 2))
-        # Z rotation (roll)
-        z = math.atan2(rotation_matrix[1, 0], rotation_matrix[0, 0])
-        
-        # Convert radians to degrees
-        return (x * 180.0 / math.pi, y * 180.0 / math.pi, z * 180.0 / math.pi)
+        try:
+            # Check if valid rotation matrix
+            if rotation_matrix.shape != (3, 3):
+                return (0.0, 0.0, 0.0)
+            
+            # Handle singularity case (gimbal lock)
+            # Check for gimbal lock: when rotation_matrix[2,0] is close to +/-1
+            threshold = 0.998
+            if abs(rotation_matrix[2, 0]) > threshold:
+                # Gimbal lock detected
+                # Set yaw (y) to ±90 degrees based on the sign of rotation_matrix[2,0]
+                y = -math.copysign(math.pi/2, rotation_matrix[2, 0])
+                # In gimbal lock, roll and pitch are coupled
+                z = 0.0  # Arbitrary choice for roll
+                # Compute pitch given our roll choice
+                x = math.atan2(rotation_matrix[0, 1], rotation_matrix[1, 1])
+            else:
+                # Normal case - no gimbal lock
+                # Y rotation (yaw)
+                y = math.asin(-rotation_matrix[2, 0])
+                cos_y = math.cos(y)
+                
+                # X rotation (pitch)
+                x = math.atan2(rotation_matrix[2, 1] / cos_y, rotation_matrix[2, 2] / cos_y)
+                
+                # Z rotation (roll)
+                z = math.atan2(rotation_matrix[1, 0] / cos_y, rotation_matrix[0, 0] / cos_y)
+            
+            # Create debug log with angles in degrees 
+            angles_degrees = (x * 180.0 / math.pi, y * 180.0 / math.pi, z * 180.0 / math.pi)
+            
+            # Filter out NaN values
+            if any(math.isnan(angle) for angle in angles_degrees):
+                return (0.0, 0.0, 0.0)
+            
+            return angles_degrees
+            
+        except Exception as e:
+            # Handle any errors in calculation
+            print(f"Error calculating angles from rotation matrix: {str(e)}")
+            return (0.0, 0.0, 0.0)
     
     def draw_head_pose_axes(self, frame: np.ndarray, landmarks: List[List[float]], 
                            length: int = 50) -> np.ndarray:
