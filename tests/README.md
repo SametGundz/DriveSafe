@@ -30,6 +30,18 @@ The tests are organized by module:
   - `test_head_pose_estimator.py`: Tests for the `HeadPoseEstimator` class
   - `test_gaze_detector.py`: Tests for the `GazeDetector` class
   - `test_mediapipe_helper.py`: Tests for the `MediaPipeHelper` class
+- `detection/`: Tests for detection modules
+  - `test_gaze_zone_detector.py`: Tests for the `GazeZoneDetector` class
+
+## Interactive Demos
+
+Some test files also serve as interactive demonstrations:
+
+- `test_gaze_zone_detector.py`: Demonstrates the gaze zone detection system with a webcam
+  ```bash
+  python tests/test_gaze_zone_detector.py --camera 0 --history 10 --stability 0.7
+  ```
+  This demo visualizes which zone in the car interior the driver is looking at (dashboard, mirrors, windshield, etc.) and tracks viewing duration for each zone.
 
 ## Writing New Tests
 

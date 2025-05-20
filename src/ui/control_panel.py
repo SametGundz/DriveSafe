@@ -28,6 +28,7 @@ class ControlPanel(QWidget):
     landmarks_toggled = pyqtSignal(bool)
     head_pose_toggled = pyqtSignal(bool)
     gaze_toggled = pyqtSignal(bool)
+    gaze_zone_toggled = pyqtSignal(bool)
     expand_charts_clicked = pyqtSignal()
     
     def __init__(self, config, parent=None):
@@ -110,6 +111,13 @@ class ControlPanel(QWidget):
         self.gaze_button.clicked.connect(self._on_gaze_toggled)
         layout.addWidget(self.gaze_button)
         
+        # Toggle gaze zone button
+        self.gaze_zone_button = QPushButton("Bakış Bölgesini Göster")
+        self.gaze_zone_button.setCheckable(True)
+        self.gaze_zone_button.setChecked(False)
+        self.gaze_zone_button.clicked.connect(self._on_gaze_zone_toggled)
+        layout.addWidget(self.gaze_zone_button)
+        
         # Add expanded charts button
         self.expand_charts_button = QPushButton("Grafikleri Genişlet")
         self.expand_charts_button.setFixedSize(
@@ -151,6 +159,14 @@ class ControlPanel(QWidget):
             self.gaze_button.setStyleSheet("background-color: #9C27B0; color: white;")
         else:
             self.gaze_button.setStyleSheet("")
+    
+    def _on_gaze_zone_toggled(self, checked):
+        """Handle gaze zone button toggle."""
+        self.gaze_zone_toggled.emit(checked)
+        if checked:
+            self.gaze_zone_button.setStyleSheet("background-color: #4CAF50; color: white;")
+        else:
+            self.gaze_zone_button.setStyleSheet("")
     
     def update_start_stop_state(self, is_capturing):
         """Update the state of start/stop buttons."""

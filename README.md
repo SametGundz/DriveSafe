@@ -7,6 +7,7 @@ Bu proje, sürücülerin uykululuk durumunu gerçek zamanlı olarak tespit eden 
 - **Gerçek zamanlı yüz tespiti ve izleme**: MediaPipe Face Mesh kullanarak yüksek hassasiyetli yüz işaretleri tespiti
 - **ETH-XGaze entegrasyonu**: Gelişmiş bakış yönü tahmini için son teknoloji modelin kullanımı
 - **Uykululuk tespiti**: EAR (Eye Aspect Ratio), MAR (Mouth Aspect Ratio) ve PERCLOS (Percentage of Eye Closure) metrikleri ile gelişmiş analiz
+- **Bakış bölgesi (Gaze Zone) analizi**: Sürücünün araç içinde nereye baktığını (dikiz aynası, direksiyon, yan pencereler vb.) tespit eden ve raporlayan sistem
 - **Performans optimizasyonları**: Yapılandırılabilir kare atlama ve önbelleğe alma stratejileri
 - **Modüler mimari**: Bakım ve genişletme kolaylığı sağlayan bileşen tabanlı yapı
 - **Çoklu giriş desteği**: Web kamerası veya video dosyası girişi
@@ -24,6 +25,7 @@ Sistem, aşağıdaki ana bileşenlerden oluşan modüler bir mimariye sahiptir:
 - **Facial Metrics**: EAR ve MAR gibi metrik hesaplamaları
 - **HeadPoseEstimator**: Yüz landmarklarından baş pozisyonu tahmini
 - **GazeDetector**: Bakış yönü tespiti ve görselleştirme
+- **GazeZoneDetector**: Bakış yönü açılarından araç içi bölge tespiti ve analizi
 - **MediaPipeHelper**: Tüm bileşenleri birleştiren entegrasyon arayüzü
 
 ### Kullanıcı Arayüzü Bileşenleri
@@ -160,6 +162,18 @@ python examples/drowsiness_detection.py --device cpu --input webcam
 python examples/drowsiness_detection.py --device cpu --input path/to/video.mp4
 ```
 
+### Bakış Bölgesi Tespiti Demo
+
+Sürücünün araç içinde nereye baktığını (dikiz aynası, direksiyon, yan pencere vb.) tespit etmek için:
+
+```bash
+python tests/test_gaze_zone_detector.py --camera 0
+# veya farklı parametreler ile:
+python tests/test_gaze_zone_detector.py --camera 0 --history 15 --stability 0.7 --show_landmarks
+```
+
+Bu demo, sürücünün araç içinde 9 farklı bölgeye (sol yan pencere, direksiyon, dikiz aynası vb.) ne kadar süreyle baktığını tespit eder ve raporlar. Sonuçlar gerçek zamanlı olarak görüntülenir ve her bölge için toplam bakış süreleri hesaplanır.
+
 ### Model Dönüştürücü
 
 ETH-XGaze model formatlarını dönüştürmek için:
@@ -199,6 +213,12 @@ Bu projede, performansı ve kod organizasyonunu iyileştirmek için MediaPipe i�
   - Yüz normalizasyonu ve görüntü ön işleme
   - Bakış vektörü görselleştirme
   - Kare atlama optimizasyonu ile performans iyileştirme
+
+- **GazeZoneDetector**:
+  - Bakış açılarından araç içi bölge tespiti (9 farklı bölge)
+  - Bakılan bölgelerin süre takibi ve istatistikleri 
+  - Stabilize edilmiş bölge tespiti ile daha doğru sonuçlar
+  - Modüler ve genişletilebilir bölge tanımlama yapısı
 
 - **MediaPipeHelper**: 
   - Tüm modüler bileşenleri birleştiren entegrasyon katmanı

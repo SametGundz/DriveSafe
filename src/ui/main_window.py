@@ -35,6 +35,10 @@ from src.ui.graph_utils import ExpandedChartsWindow, create_chart_data_from_seri
 # Import logger for application
 from src.utils.logger import DrowsinessLogger
 
+# Import gaze statistics recorder
+from src.detection.gaze_statistics import get_gaze_statistics_recorder
+from src.detection.gaze_zone_detector import get_gaze_zone_detector
+
 class DriverDrowsinessMainWindow(QMainWindow):
     """
     Main window for the driver drowsiness detection application.
@@ -58,6 +62,8 @@ class DriverDrowsinessMainWindow(QMainWindow):
         self.show_landmarks = False
         self.show_head_pose = False
         self.show_gaze = False
+        self.show_gaze_zone = False
+        self.current_gaze_zone = None
         
         # Camera settings
         self.camera_id = 0
@@ -383,6 +389,7 @@ class DriverDrowsinessMainWindow(QMainWindow):
         self.control_panel.landmarks_toggled.connect(self._toggle_landmarks)
         self.control_panel.head_pose_toggled.connect(self._toggle_head_pose)
         self.control_panel.gaze_toggled.connect(self._toggle_gaze)
+        self.control_panel.gaze_zone_toggled.connect(self._toggle_gaze_zone)
         self.control_panel.expand_charts_clicked.connect(self._show_expanded_charts)
         
         # Grafik paneli - başlık olmadan direkt paneli ekle
@@ -441,6 +448,12 @@ class DriverDrowsinessMainWindow(QMainWindow):
         status = "gösteriliyor" if self.show_gaze else "gizleniyor"
         self.update_status(f"Bakış yönü {status}")
     
+    def _toggle_gaze_zone(self, checked):
+        """Toggle the display of gaze zone."""
+        self.show_gaze_zone = checked
+        status = "gösteriliyor" if self.show_gaze_zone else "gizleniyor"
+        self.update_status(f"Bakış bölgesi {status}")
+    
     def on_start(self):
         """Start drowsiness detection."""
         if self.is_capturing:
@@ -454,6 +467,9 @@ class DriverDrowsinessMainWindow(QMainWindow):
             if not self.mediapipe_helper:
                 self.mediapipe_helper = get_mediapipe_helper()
                 self.logger.debug("MediaPipe helper initialized")
+            
+            # Initialize gaze statistics recorder
+            self.gaze_stats_recorder = get_gaze_statistics_recorder()
             
             # Open camera
             self.cap = cv2.VideoCapture(self.camera_id)
@@ -512,6 +528,15 @@ class DriverDrowsinessMainWindow(QMainWindow):
             return
             
         self.logger.info("Stopping drowsiness detection")
+        
+        # Generate gaze statistics report if we have data
+        if hasattr(self, 'gaze_stats_recorder'):
+            try:
+                report_files = self.gaze_stats_recorder.generate_report()
+                self.logger.info(f"Gaze statistics report generated: {report_files}")
+                self.update_status(f"Bakış bölgesi istatistikleri kaydedildi: {report_files['csv']}")
+            except Exception as e:
+                self.logger.error(f"Error generating gaze statistics report: {str(e)}")
         
         # Stop timers
         if self.camera_timer.isActive():
@@ -692,6 +717,104 @@ class DriverDrowsinessMainWindow(QMainWindow):
                     # Görüntüyü ana kareye yerleştir (sağ üst köşe)
                     h, w = norm_face_display.shape[:2]
                     processed_frame[10:10+h, processed_frame.shape[1]-w-10:processed_frame.shape[1]-10] = norm_face_display
+                
+                # Bakış açılarını ekranda göster (FPS stilinde)
+                # Sadece gaze vector geçerli ise ve gözler açıksa göster
+                if (hasattr(self.mediapipe_helper.gaze_detector, '_last_gaze_vector') and 
+                        self.mediapipe_helper.gaze_detector._last_gaze_vector is not None and 
+                        (ear is None or ear >= ear_threshold)):
+                    pitch, yaw = np.rad2deg(self.mediapipe_helper.gaze_detector._last_gaze_vector)
+                    
+                    # Bakış yönü metnini oluştur
+                    pitch_yaw_text = f"Pitch: {pitch:.1f}° Yaw: {yaw:.1f}°"
+                    font = cv2.FONT_HERSHEY_SIMPLEX
+                    font_scale = 0.5  # FPS ile aynı boyut
+                    thickness = 1     # FPS ile aynı kalınlık
+                    font_color = (0, 255, 255)  # FPS ile aynı renk
+                    
+                    # Metin boyutunu al
+                    (text_width, text_height), baseline = cv2.getTextSize(pitch_yaw_text, font, font_scale, thickness)
+                    
+                    # Sol üst köşe pozisyonu
+                    text_x = 10
+                    text_y = 30
+                    
+                    # Arka plan kutusu çiz
+                    padding = 5
+                    cv2.rectangle(
+                        processed_frame,
+                        (text_x - padding, text_y - text_height - padding),
+                        (text_x + text_width + padding, text_y + padding),
+                        (0, 0, 0),  # Siyah
+                        -1  # Dolu
+                    )
+                    
+                    # Pitch ve Yaw yazısını ekle
+                    cv2.putText(
+                        processed_frame,
+                        pitch_yaw_text,
+                        (text_x, text_y),
+                        font,
+                        font_scale,
+                        font_color,
+                        thickness
+                    )
+                
+                # Bakış bölgesi tespiti ve görselleştirme
+                if self.show_gaze_zone:
+                    # Sadece gaze vector geçerli ise ve gözler açıksa göster
+                    if (hasattr(self.mediapipe_helper.gaze_detector, '_last_gaze_vector') and 
+                            self.mediapipe_helper.gaze_detector._last_gaze_vector is not None and 
+                            (ear is None or ear >= ear_threshold)):
+                        gaze_vector = self.mediapipe_helper.gaze_detector._last_gaze_vector
+                        zone_id = self.mediapipe_helper.gaze_detector.get_gaze_target_zone(gaze_vector)
+                        self.current_gaze_zone = zone_id
+                        
+                        # Tespit edilen bölgeyi istatistiklerde kaydet
+                        if hasattr(self, 'gaze_stats_recorder'):
+                            self.gaze_stats_recorder.record_gaze_zone(zone_id)
+                        
+                        # Bölge adını al
+                        zone_detector = get_gaze_zone_detector()
+                        zone_name = zone_detector.get_zone_name(zone_id)
+                        
+                        # Pitch ve yaw değerlerini alalım
+                        pitch, yaw = np.rad2deg(gaze_vector)
+                        
+                        # Bakış bölgesi metnini oluştur - Türkçe karakter sorununu önlemek için İngilizce kullan
+                        if zone_id is not None:
+                            gaze_zone_text = f"Gaze Zone: {zone_name} ({zone_id})"
+                        else:
+                            # Bölge bilinmiyorsa açı değerlerini göster
+                            gaze_zone_text = f"Undefined zone: Pitch={pitch:.1f}°, Yaw={yaw:.1f}°"
+                        
+                        # Metin boyutunu al
+                        (text_width, text_height), baseline = cv2.getTextSize(gaze_zone_text, font, font_scale, thickness)
+                        
+                        # Sol üst köşe pozisyonu - pitch/yaw metninin altında
+                        text_x = 10
+                        text_y = 60
+                        
+                        # Arka plan kutusu çiz
+                        padding = 5
+                        cv2.rectangle(
+                            processed_frame,
+                            (text_x - padding, text_y - text_height - padding),
+                            (text_x + text_width + padding, text_y + padding),
+                            (0, 0, 0),  # Siyah
+                            -1  # Dolu
+                        )
+                        
+                        # Bakış bölgesi yazısını ekle
+                        cv2.putText(
+                            processed_frame,
+                            gaze_zone_text,
+                            (text_x, text_y),
+                            font,
+                            font_scale,
+                            font_color,
+                            thickness
+                        )
             
             # Draw landmarks if enabled - SON OLARAK YÜZ İŞARETLERİNİ ÇİZ
             if self.show_landmarks:

@@ -18,6 +18,9 @@ import logging
 import time
 from typing import List, Tuple, Optional, Union, Dict, Any
 
+# İlgili dosyanın en üst kısmına yeni import ekleyin
+from src.detection.gaze_zone_detector import get_gaze_zone_detector
+
 # Logger oluşturma
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("GazeDetector")
@@ -736,12 +739,8 @@ class GazeDetector:
         # Bakış yönünü çiz
         vis_frame = self.draw_gaze(vis_frame, gaze_vector, gaze_origin, overlay=False)
         
-        # Bakış açılarını ekranda göster
-        pitch, yaw = np.rad2deg(gaze_vector)
-        cv2.putText(vis_frame, f"Pitch: {pitch:.1f}", (10, 30), 
-                  cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        cv2.putText(vis_frame, f"Yaw: {yaw:.1f}", (10, 60), 
-                  cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        # Pitch, yaw değerlerini ekranda göstermeyi kaldırdık, bu şimdi main_window'dan yapılıyor
+        # Ana pencerede daha iyi biçimlendirilmiş metin için
         
         return vis_frame, normalized_image
     
@@ -830,36 +829,80 @@ class GazeDetector:
         attention = self.check_attention(gaze_vector, max_pitch_deg, max_yaw_deg)
         return attention > 0.7  # %70'ten fazla dikkat ileri bakıyor sayılır
     
-    def get_gaze_target_zone(self, gaze_vector: np.ndarray) -> str:
+    def get_gaze_target_zone(self, gaze_vector: np.ndarray) -> int:
         """
-        Determine which zone the driver is looking at.
+        Bakış vektörüne göre hedef bölgeyi belirler.
         
         Args:
-            gaze_vector: (pitch, yaw) gaze direction in radians
-            
+            gaze_vector: (pitch, yaw) açılarını içeren bakış yönü vektörü (radyan)
+                
         Returns:
-            str: Zone name ('road', 'dashboard', 'left_mirror', 'right_mirror', 'rearview_mirror', 'other')
+            int: Hedef bölge ID'si (0-8) veya None
         """
         if gaze_vector is None or len(gaze_vector) < 2:
-            return 'unknown'
+            return None
         
-        # Radyandan dereceye çevir
+        # Açıları derece cinsine çevir
         pitch_deg = np.rad2deg(gaze_vector[0])
         yaw_deg = np.rad2deg(gaze_vector[1])
         
-        # Bölge tanımları (değerler yaklaşıktır ve araç yapısına göre ayarlanabilir)
-        if abs(yaw_deg) < 20 and abs(pitch_deg) < 10:
-            return 'road'  # Yol - ileri bakış
-        elif abs(yaw_deg) < 25 and pitch_deg > 10:
-            return 'dashboard'  # Gösterge paneli
-        elif yaw_deg < -30 and abs(pitch_deg) < 15:
-            return 'left_mirror'  # Sol ayna
-        elif yaw_deg > 30 and abs(pitch_deg) < 15:
-            return 'right_mirror'  # Sağ ayna
-        elif abs(yaw_deg) < 10 and pitch_deg < -10:
-            return 'rearview_mirror'  # Dikiz aynası
+        # Debug log eklentisi
+        logger.debug(f"Gaze angles for zone detection - Pitch: {pitch_deg:.2f}°, Yaw: {yaw_deg:.2f}°")
+        
+        # GazeZoneDetector kullanarak bölge tespiti
+        zone_detector = get_gaze_zone_detector()
+        current_time = time.time()
+        zone = zone_detector.update(pitch_deg, yaw_deg, current_time)
+        
+        # Debug log eklentisi
+        if zone is None:
+            logger.debug(f"No zone detected for Pitch: {pitch_deg:.2f}°, Yaw: {yaw_deg:.2f}°")
         else:
-            return 'other'  # Diğer bölgeler
+            zone_name = zone_detector.get_zone_name(zone)
+            logger.debug(f"Detected zone: {zone_name} ({zone}) for Pitch: {pitch_deg:.2f}°, Yaw: {yaw_deg:.2f}°")
+        
+        return zone
+    
+    def visualize_gaze_zone(self, frame: np.ndarray, landmarks: List[List[float]]) -> Tuple[np.ndarray, Optional[int]]:
+        """
+        Bakış bölgesini tespit eder ve görselleştirir.
+        
+        Args:
+            frame: Giriş karesi
+            landmarks: Yüz landmarkları listesi
+            
+        Returns:
+            Tuple[np.ndarray, Optional[int]]: 
+                - Görselleştirilmiş kare
+                - Tespit edilen bölge ID'si
+        """
+        if not landmarks:
+            return frame, None
+        
+        # Bakış yönünü tahmin et
+        gaze_vector, _ = self.predict_gaze(frame, landmarks)
+        
+        # Bölge tespiti yap
+        zone_id = self.get_gaze_target_zone(gaze_vector)
+        
+        # Bölge adını al
+        zone_detector = get_gaze_zone_detector()
+        zone_name = zone_detector.get_zone_name(zone_id)
+        
+        # Bakılan bölgeyi ekranda göster
+        if zone_id is not None:
+            # Bakış bölgesi bilgisini ekrana yazdır
+            cv2.putText(
+                frame, 
+                f"Gaze Zone: {zone_name} ({zone_id})", 
+                (10, 60), 
+                cv2.FONT_HERSHEY_SIMPLEX, 
+                0.7, 
+                (0, 255, 0), 
+                2
+            )
+        
+        return frame, zone_id
     
     def reset(self):
         """Reset frame counter and cached values."""
