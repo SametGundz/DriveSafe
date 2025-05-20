@@ -28,15 +28,11 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger("GazeZoneTest")
 
 ZONE_COLORS = [
-    (255, 0, 0),    # 0: Sol yan pencere - Blue
-    (0, 255, 255),  # 1: Sol üst - Yellow
-    (0, 255, 0),    # 2: Sol ön cam - Green
-    (255, 0, 255),  # 3: Direksiyon - Magenta
-    (0, 0, 255),    # 4: Dikiz aynası - Red
-    (255, 255, 0),  # 5: Orta konsol - Cyan
-    (255, 128, 0),  # 6: Sağ ön cam - Orange
-    (128, 0, 255),  # 7: Sağ alt - Purple
-    (0, 128, 255),  # 8: Sağ yan - Brown
+    (255, 0, 255),  # 0: Road Center - Magenta
+    (0, 255, 255),  # 1: Dashboard - Yellow
+    (0, 128, 255),  # 2: Left Side - Brown
+    (255, 0, 0),    # 3: Right Side - Blue
+    (0, 0, 255),    # 4: Rear Mirror - Red
 ]
 
 def rad2deg(rad: float) -> float:
