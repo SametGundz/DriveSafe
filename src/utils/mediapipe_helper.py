@@ -119,10 +119,33 @@ class MediaPipeHelper(FaceLandmarkDetector):
             frame: Input image frame
             
         Returns:
-            tuple: Head pose angles (roll, pitch, yaw)
+            tuple: Head pose angles (pitch, yaw, roll)
         """
-        _, angles = self.head_pose_estimator.calculate_head_pose(landmarks, frame)
-        return angles
+        try:
+            # Frame boyutlarını kontrol et
+            if isinstance(frame, np.ndarray):
+                frame_shape = frame.shape
+            else:
+                # Frame bir ndarray değilse (örneğin tuple olarak boyutlar verilmişse)
+                frame_shape = frame
+                # Dummy frame oluştur
+                if len(frame_shape) >= 2:
+                    h, w = frame_shape[:2]
+                    dummy_frame = np.zeros((h, w, 3), dtype=np.uint8)
+                    _, angles = self.head_pose_estimator.calculate_head_pose(landmarks, dummy_frame)
+                    # HeadPoseEstimator açıları (pitch, yaw, roll) sırasında döndürür
+                    return angles
+            
+            # Head pose hesaplama
+            _, angles = self.head_pose_estimator.calculate_head_pose(landmarks, frame)
+            
+            # Açıları döndür - HeadPoseEstimator (pitch, yaw, roll) sırasında döndürür
+            # Tutarlılık için bu sırayı koruyalım
+            return angles
+        except Exception as e:
+            logger.error(f"Error in get_head_pose: {str(e)}")
+            # Hata durumunda varsayılan değerleri döndür
+            return (0.0, 0.0, 0.0)
     
     def visualize_head_pose(self, frame: np.ndarray, landmarks: List[List[float]], 
                            show_axes: bool = True, show_angles: bool = True,
@@ -188,6 +211,16 @@ class MediaPipeHelper(FaceLandmarkDetector):
         return self.gaze_detector.visualize_gaze(
             frame, landmarks, ear_value, ear_threshold, frame_skip
         )
+    
+    def can_detect_head_pose(self) -> bool:
+        """
+        Head pose tespiti yapabilip yapamayacağını kontrol eder.
+        
+        Returns:
+            bool: Head pose tespiti yapılabilirse True, aksi halde False
+        """
+        # HeadPoseEstimator mevcut ve hazır mı kontrol et
+        return hasattr(self, 'head_pose_estimator') and self.head_pose_estimator is not None
     
     def release(self) -> None:
         """

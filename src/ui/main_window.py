@@ -14,6 +14,7 @@ import cv2
 import logging
 import time
 from pathlib import Path
+import numpy as np
 
 from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QStatusBar, QLabel, QSizePolicy
 from PyQt6.QtCore import Qt, QTimer, QSize
@@ -227,7 +228,7 @@ class DriverDrowsinessMainWindow(QMainWindow):
         )
         main_layout.setSpacing(self.config['layout']['spacing'])
         
-        # Top area (video + stats)
+        # Top area (video + stats + 3D model)
         top_layout = QHBoxLayout()
         top_layout.setContentsMargins(0, 0, 0, 0)
         top_layout.setSpacing(10)  # Panel arasında yeterli boşluk bırak
@@ -244,6 +245,11 @@ class DriverDrowsinessMainWindow(QMainWindow):
         video_widget.setLayout(video_container)
         video_widget.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
         top_layout.addWidget(video_widget, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        
+        # 3D Head Pose modeli ekleme
+        from src.ui.head_pose_model import Head3DPanel
+        self.head_pose_panel = Head3DPanel(self.config)
+        top_layout.addWidget(self.head_pose_panel, 0, Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignTop)
         
         # Metrikler ve video paneli arasında az bir esnek alan ekle
         top_layout.addStretch(1)  # Float değil integer kullan
@@ -456,7 +462,34 @@ class DriverDrowsinessMainWindow(QMainWindow):
         left_ear = 0.0
         right_ear = 0.0
         
+        # Head pose değişkenlerini ekle
+        self._frame_counter = getattr(self, '_frame_counter', 0)
+        self._head_pose_update_frequency = 2  # Kaç karede bir head pose güncelleneceği
+        
         if face_detected:
+            # Head pose tespiti için daha güvenli bir kontrol yap
+            try:
+                # Her karede değil, belirli aralıklarla head pose hesaplaması yap (performans iyileştirmesi)
+                if self._frame_counter % self._head_pose_update_frequency == 0:
+                    # Önce MediaPipeHelper'in head pose işlevlerine sahip olup olmadığını kontrol et
+                    if hasattr(self.mediapipe_helper, 'get_head_pose') and self.mediapipe_helper.can_detect_head_pose():
+                        # Head pose hesapla 
+                        pitch, yaw, roll = self.mediapipe_helper.get_head_pose(landmarks, frame)
+                        
+                        # Head pose değerlerini sakla
+                        self.head_pitch = pitch
+                        self.head_yaw = yaw
+                        self.head_roll = roll
+                        
+                        # Değerlerin geçerli olduğundan emin ol
+                        if not (np.isnan(pitch) or np.isnan(yaw) or np.isnan(roll)):
+                            # 3D modeli güncelle - 3D panel tanımlandı mı emin olalım
+                            if hasattr(self, 'head_pose_panel'):
+                                self.head_pose_panel.update_pose(pitch, yaw, roll)
+                                self.logger.debug(f"Head pose updated: Pitch={pitch:.1f}, Yaw={yaw:.1f}, Roll={roll:.1f}")
+            except Exception as e:
+                self.logger.error(f"Error processing head pose: {str(e)}")       
+            
             # Get eye landmarks
             left_eye_landmarks = self.mediapipe_helper.get_eye_landmarks(landmarks, left_eye=True)
             right_eye_landmarks = self.mediapipe_helper.get_eye_landmarks(landmarks, left_eye=False)
