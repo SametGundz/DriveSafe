@@ -462,8 +462,8 @@ class HeadPoseModelWidget(QOpenGLWidget):
                 logger.error(f"Error initializing GLUT: {str(glut_error)}")
                 self.glut_initialized = False
                 
-            # Arka plan rengini ayarla (koyu gri tonda)
-            glClearColor(0.15, 0.15, 0.15, 1.0)
+            # Arka plan rengini ayarla (daha koyu bir ton)
+            glClearColor(0.1, 0.1, 0.1, 1.0)
             
             # Derinlik testi etkinleştir
             glEnable(GL_DEPTH_TEST)
@@ -1014,8 +1014,8 @@ class HeadPoseModelWidget(QOpenGLWidget):
         # Sağ üst köşe pozisyonu hesapla
         right_x = self.width() - box_width - margin
         
-        # Yarı saydam bir arka plan kutusu çiz
-        glColor4f(0.0, 0.0, 0.0, 0.8)  # Siyah, %80 opak
+        # Tamamen opak siyah arka plan kutusu çiz
+        glColor4f(0.0, 0.0, 0.0, 1.0)  # Siyah, %100 opak
         
         glBegin(GL_QUADS)
         glVertex2f(right_x, margin)
@@ -1260,10 +1260,17 @@ class Head3DPanel(QWidget):
         
         self.config = config
         
+        # Panel arka planını siyah olarak ayarla - 3D model daha iyi görünür
+        self.setStyleSheet("""
+            background-color: black;
+            border: none;
+            padding: 0px;
+        """)
+        
         # Layout ekle
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)  # Dış boşlukları kaldır
-        layout.setSpacing(5)  # Minimal boşluk
+        layout.setContentsMargins(0, 0, 0, 0)  # Dış boşlukları tamamen kaldır
+        layout.setSpacing(0)  # Panel içi boşlukları da kaldır
 
         # 3D model görüntüleme widget'ı
         self.head_pose_widget = HeadPoseModelWidget(self, config)
