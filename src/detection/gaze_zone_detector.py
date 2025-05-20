@@ -25,42 +25,30 @@ class GazeZoneDetector:
     sürücünün araç içindeki hangi bölgeye baktığını tespit eder.
     
     Bölge tanımları:
-    - 0: Right Side - sağ ekstrem
-    - 1: Right Top - sağ üst açı
-    - 2: Right Windshield - sağda, yukarıda
-    - 3: Steering Wheel - merkezde, aşağıda
-    - 4: Rear Mirror - orta üstte
-    - 5: Center Console - orta konsol
-    - 6: Left Windshield - solda, yukarıda
-    - 7: Left Bottom - sol alt
-    - 8: Left Side - sol ekstrem
+    - 0: Road Center - Yol merkezi
+    - 1: Dashboard - Gösterge paneli
+    - 2: Left Side - Sol taraf
+    - 3: Right Side - Sağ taraf
+    - 4: Rear Mirror - Dikiz aynası
     """
     
     # Bölge tanımları - (yaw_min, yaw_max, pitch_min, pitch_max)
     # Açı değerleri derece cinsindendir
     ZONES = {
-        0: (35, 90, -20, 20),     # Right Side - sağ ekstrem
-        1: (20, 40, 5, 45),       # Right Top - sağ üst açı
-        2: (0, 30, -5, 25),       # Right Windshield - sağda, yukarıda
-        3: (-15, 15, -30, 0),     # Steering Wheel - merkezde, aşağıda
-        4: (-10, 10, 0, 30),      # Rear Mirror - orta üstte
-        5: (-20, 0, -25, 5),      # Center Console - orta konsol
-        6: (-30, 0, 0, 25),       # Left Windshield - solda, yukarıda
-        7: (-40, -15, -25, -5),   # Left Bottom - sol alt
-        8: (-90, -35, -20, 20),   # Left Side - sol ekstrem
+        0: (-15, 15, -15, 15),     # Road Center - Yol merkezi
+        1: (-15, 15, -40, -15),    # Dashboard - Gösterge paneli (üst sınır hariç)
+        2: (15, 90, -40, 40),      # Left Side - Sol taraf (alt sınır hariç)
+        3: (-90, -15, -40, 40),    # Right Side - Sağ taraf (üst sınır hariç)
+        4: (-15, 15, 15, 40),      # Rear Mirror - Dikiz aynası (alt sınır hariç)
     }
     
     # Bölge adları
     ZONE_NAMES = [
-        "Right Side",      # 0
-        "Right Top",       # 1
-        "Right Windshield",# 2
-        "Steering Wheel",  # 3
-        "Rear Mirror",     # 4
-        "Center Console",  # 5
-        "Left Windshield", # 6
-        "Left Bottom",     # 7
-        "Left Side"        # 8
+        "Road Center",     # 0
+        "Dashboard",       # 1
+        "Left Side",       # 2
+        "Right Side",      # 3
+        "Rear Mirror"      # 4
     ]
     
     def __init__(self, history_size: int = 10, stability_threshold: float = 0.5):
@@ -141,9 +129,25 @@ class GazeZoneDetector:
         # Açıları konsola yazdır (debug için)
         logger.debug(f"Gaze angles - Pitch: {pitch:.2f}°, Yaw: {yaw:.2f}°")
         
-        for zone_id, (yaw_min, yaw_max, pitch_min, pitch_max) in self.ZONES.items():
-            if yaw_min <= yaw <= yaw_max and pitch_min <= pitch <= pitch_max:
-                return zone_id
+        # Road Center (zone 0): -15 <= yaw <= 15, -15 <= pitch <= 15 (tam sınırlar dahil)
+        if -15 <= yaw <= 15 and -15 <= pitch <= 15:
+            return 0
+            
+        # Dashboard (zone 1): -15 <= yaw <= 15, -40 <= pitch < -15 (üst sınır hariç)
+        if -15 <= yaw <= 15 and -40 <= pitch < -15:
+            return 1
+            
+        # Left Side (zone 2): 15 < yaw <= 90, -40 <= pitch <= 40 (alt sınır hariç)
+        if 15 < yaw <= 90 and -40 <= pitch <= 40:
+            return 2
+            
+        # Right Side (zone 3): -90 <= yaw < -15, -40 <= pitch <= 40 (üst sınır hariç)
+        if -90 <= yaw < -15 and -40 <= pitch <= 40:
+            return 3
+            
+        # Rear Mirror (zone 4): -15 <= yaw <= 15, 15 < pitch <= 40 (alt sınır hariç)
+        if -15 <= yaw <= 15 and 15 < pitch <= 40:
+            return 4
         
         # Tanımlı bölgelerin dışında
         logger.debug(f"No matching zone for Pitch: {pitch:.2f}°, Yaw: {yaw:.2f}°")
