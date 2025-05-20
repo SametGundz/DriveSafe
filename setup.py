@@ -4,11 +4,11 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="driver-drowsiness",
+    name="driver-distraction-and-drowsiness-detection-system",
     version="0.1.0",
     description="Sürücü uykululuk tespiti için gerçek zamanlı bir sistem",
     author="Samet",
-    author_email="samet@example.com",
+    author_email="samet-gunduz@hotmail.com",
     packages=find_packages(),
     include_package_data=True,
     install_requires=[

@@ -6,7 +6,7 @@ camera:
   width: 640
   height: 480
   fps: 30
-  device_id: 2
+  device_id: 0
   # ETH-XGaze için kamera kalibrasyonu parametreleri
   # Bunlar varsayılan değerlerdir, kameranıza göre değiştirilmelidir
   matrix: [1000.0, 0.0, 320.0, 0.0, 1000.0, 240.0, 0.0, 0.0, 1.0]  # 3x3 kamera matrisi düzleştirilmiş halde
@@ -40,6 +40,32 @@ drowsiness:
   mar_open_duration: 1.0           # Ağzın açık kalma süresi eşiği (saniye)
   min_perclos_for_drowsy: 12.0     # Uykululuk için minimum PERCLOS değeri
   history_duration: 5.0            # Geçmiş verileri saklama süresi (saniye)
+
+# Bakış izleme parametreleri (EU regülasyonu C(2023)4523 için)
+gaze_monitoring:
+  thresholds:
+    # Alan 1 (infotainment gibi sürüşle ilgili olmayan alanlar) bakış süresi eşikleri
+    area1:
+      warning: 2.0       # saniye (2s üzerinde uyarı)
+      critical: 3.0      # saniye (3s üzerinde kritik)
+    
+    # Yol merkezine bakmama süresi eşikleri
+    road_center_absence:
+      warning: 3.0       # saniye (3s üzerinde uyarı)
+      critical: 4.0      # saniye (4s üzerinde kritik)
+    
+    # Diğer Alan 2 bölgeleri için bakış süresi eşikleri (Road Center hariç)
+    area2:
+      warning: 2.0       # saniye (2s üzerinde uyarı)
+      critical: 3.0      # saniye (3s üzerinde kritik)
+    
+    # Alan 1'de geçirilen toplam süre yüzdesi eşikleri
+    area1_percentage:
+      warning: 15.0      # yüzde (%15 üzerinde uyarı)
+      critical: 20.0     # yüzde (%20 üzerinde kritik)
+  
+  # İzleme penceresi süresi (son N saniyeyi analiz etmek için)
+  time_window: 60.0      # saniye
 
 # Günlükleme parametreleri
 logging:
