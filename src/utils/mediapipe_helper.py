@@ -263,10 +263,9 @@ def load_ui_config() -> Dict[str, Any]:
         with open(config_path, 'r', encoding='utf-8') as config_file:
             config = yaml.safe_load(config_file)
             
-        # Ana konfigürasyon dosyasından UI kısmını al
-        ui_config = config.get('ui', {})
-        logger.info(f"UI configuration loaded from {config_path}")
-        return ui_config
+        # Tüm konfigürasyonu döndür, sadece UI kısmını değil
+        logger.info(f"Configuration loaded from {config_path}")
+        return config
     except Exception as e:
         logger.error(f"Error loading config: {str(e)}")
         return {} 

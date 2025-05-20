@@ -65,14 +65,17 @@ class DriverDrowsinessMainWindow(QMainWindow):
         self.show_gaze_zone = False
         self.current_gaze_zone = None
         
-        # Camera settings
-        self.camera_id = 0
-        self.camera_width = 640
-        self.camera_height = 480
-        self.camera_fps = 30
-        
         # Load configuration
         self.config = load_ui_config()
+        
+        # Camera settings - ana konfigürasyon dosyasından al
+        self.camera_id = self.config.get('camera', {}).get('device_id', 0)
+        self.camera_width = self.config.get('camera', {}).get('width', 640)
+        self.camera_height = self.config.get('camera', {}).get('height', 480)
+        self.camera_fps = self.config.get('camera', {}).get('fps', 30)
+        
+        # UI konfigürasyonunu ayrıca sakla
+        self.ui_config = self.config.get('ui', {})
         
         # Set up logging
         self.logger = logging.getLogger(__name__)
@@ -117,14 +120,14 @@ class DriverDrowsinessMainWindow(QMainWindow):
         central widget, and status bar.
         """
         # Set window properties
-        self.setWindowTitle(self.config['window']['title'])
+        self.setWindowTitle(self.ui_config['window']['title'])
         self.resize(
-            self.config['window']['width'],
-            self.config['window']['height']
+            self.ui_config['window']['width'],
+            self.ui_config['window']['height']
         )
         self.setMinimumSize(
-            self.config['window']['min_width'],
-            self.config['window']['min_height']
+            self.ui_config['window']['min_width'],
+            self.ui_config['window']['min_height']
         )
         
         # Set application style to be minimalist and clean
@@ -206,7 +209,7 @@ class DriverDrowsinessMainWindow(QMainWindow):
     
     def _create_menu_bar(self):
         """Create the menu bar with File, View, and Help menus."""
-        self.menu_manager = MenuManager(self.config, self)
+        self.menu_manager = MenuManager(self.ui_config, self)
         self.setMenuBar(self.menu_manager)
         
         # Connect menu signals
@@ -227,12 +230,12 @@ class DriverDrowsinessMainWindow(QMainWindow):
         # Set main layout
         main_layout = QVBoxLayout(central_widget)
         main_layout.setContentsMargins(
-            self.config['layout']['margin'],
-            self.config['layout']['margin'],
-            self.config['layout']['margin'],
-            self.config['layout']['margin']
+            self.ui_config['layout']['margin'],
+            self.ui_config['layout']['margin'],
+            self.ui_config['layout']['margin'],
+            self.ui_config['layout']['margin']
         )
-        main_layout.setSpacing(self.config['layout']['spacing'])
+        main_layout.setSpacing(self.ui_config['layout']['spacing'])
         
         # Top area (video + 3D model + stats)
         top_layout = QHBoxLayout()
@@ -249,7 +252,7 @@ class DriverDrowsinessMainWindow(QMainWindow):
         video_container = QVBoxLayout()
         
         # Video panel
-        self.video_panel = VideoPanel(self.config)
+        self.video_panel = VideoPanel(self.ui_config)
         video_container.addWidget(self.video_panel)
         
         # Sol tarafta video paneli için bir container widget oluştur ve hizalamayı ayarla
@@ -263,7 +266,7 @@ class DriverDrowsinessMainWindow(QMainWindow):
         from src.ui.head_pose_model import Head3DPanel, HeadPoseModelWidget
         
         # 3D modelin kontrolleri için widget ve layout oluştur
-        self.head_pose_panel = Head3DPanel(self.config)
+        self.head_pose_panel = Head3DPanel(self.ui_config)
         # 3D modelin ana bölgede olması için boyut ayarlarını düzenle
         self.head_pose_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         # Merkezi bölgede 3D model için bir container oluştur
@@ -287,7 +290,7 @@ class DriverDrowsinessMainWindow(QMainWindow):
         right_container.setSpacing(10)
         
         # Metrics panel
-        self.metrics_panel = MetricsPanel(self.config)
+        self.metrics_panel = MetricsPanel(self.ui_config)
         # Daha kompakt bir görünüm için boyut politikasını ayarla
         self.metrics_panel.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         right_container.addWidget(self.metrics_panel)
@@ -379,7 +382,7 @@ class DriverDrowsinessMainWindow(QMainWindow):
         main_layout.addLayout(top_layout, 1)  # Top area should take more space
         
         # Kontrol paneli - daha kompakt bir görünüm için
-        self.control_panel = ControlPanel(self.config)
+        self.control_panel = ControlPanel(self.ui_config)
         main_layout.addWidget(self.control_panel, 0)  # Bottom control panel should take less space
         
         # Connect control panel signals
@@ -393,7 +396,7 @@ class DriverDrowsinessMainWindow(QMainWindow):
         self.control_panel.expand_charts_clicked.connect(self._show_expanded_charts)
         
         # Grafik paneli - başlık olmadan direkt paneli ekle
-        self.chart_panel = ChartPanel(self.config)
+        self.chart_panel = ChartPanel(self.ui_config)
         main_layout.addWidget(self.chart_panel, 0)  # Chart panel should take less space
         
         # Kontrol wrapper sinyal bağlantıları
@@ -409,7 +412,7 @@ class DriverDrowsinessMainWindow(QMainWindow):
         super().showEvent(event)
         
         # UI tam olarak yüklendikten sonra tam ekran yap
-        if self.config['window'].get('start_maximized', True):
+        if self.ui_config['window'].get('start_maximized', True):
             # QTimer kullanarak bir sonraki event loop'ta maximize yap
             QTimer.singleShot(0, self.showMaximized)
     
@@ -948,7 +951,7 @@ class DriverDrowsinessMainWindow(QMainWindow):
     
     def on_settings(self):
         """Show settings dialog."""
-        dialog = SettingsDialog(self.config, self)
+        dialog = SettingsDialog(self.ui_config, self)
         dialog.exec()
     
     def on_about(self):
@@ -979,7 +982,7 @@ class DriverDrowsinessMainWindow(QMainWindow):
         if hasattr(self, 'expanded_charts_window') and self.expanded_charts_window.isVisible():
             self.expanded_charts_window.activateWindow()
         else:
-            self.expanded_charts_window = ExpandedChartsWindow(self.config, parent=self)
+            self.expanded_charts_window = ExpandedChartsWindow(self.ui_config, parent=self)
             
             # Pencere kapatıldığında ana grafikleri tekrar etkinleştirmek için sinyal bağlantısı
             self.expanded_charts_window.closeEvent = self._on_expanded_charts_close

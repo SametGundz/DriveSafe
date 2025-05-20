@@ -1,0 +1,245 @@
+[33mcommit 781c4ed1440131150b8c209185c949161feda28e[m[33m ([m[1;36mHEAD -> [m[1;32mfeat-gazezone[m[33m)[m
+Author: samet.gunduz <samet.gunduz@mobilias.tech>
+Date:   Tue May 20 09:45:19 2025 +0300
+
+    Geçici commit - rebase öncesi
+
+[33mcommit cdcaf1e40fa0030f3fdb9ce80f18bb03bb06b8dd[m[33m ([m[1;31morigin/feat-gazezone[m[33m)[m
+Author: samet.gunduz <samet.gunduz@mobilias.tech>
+Date:   Tue May 20 08:21:27 2025 +0300
+
+    fix: update gaze zone angles
+
+[33mcommit a135f809e90c39e049e51564a0a880b25ba5f626[m[33m ([m[1;31morigin/development[m[33m, [m[1;32mdevelopment[m[33m)[m
+Author: samet.gunduz <samet.gunduz@mobilias.tech>
+Date:   Tue May 20 07:57:45 2025 +0300
+
+    fix: improved gaze zone activities
+
+[33mcommit 82dffd83528dd713735b2c28c7f6fcc27988191b[m
+Author: samet.gunduz <samet.gunduz@mobilias.tech>
+Date:   Tue May 20 07:05:19 2025 +0300
+
+    fix: layout design
+
+[33mcommit fb59a4f70fc8a542bd0c04c8f2fc06745c7fe515[m
+Merge: 90c0346 c6ba01b
+Author: Samet Gündüz <46328316+SametGundz@users.noreply.github.com>
+Date:   Tue May 20 03:55:40 2025 +0300
+
+    Merge pull request #12 from SametGundz/feat-3dfacemodel
+    
+    Feat 3dfacemodel
+
+[33mcommit c6ba01b35eb4c93a169c1da65ff96a53b0490ecc[m[33m ([m[1;31morigin/feat-3dfacemodel[m[33m, [m[1;32mfeat-3dfacemodel[m[33m)[m
+Author: samet.gunduz <samet.gunduz@mobilias.tech>
+Date:   Tue May 20 06:54:22 2025 +0300
+
+    fix: upper layout design recrated'
+
+[33mcommit da6bb917fdd9ae66d40bcf114dbf1567be5c3a59[m
+Author: samet.gunduz <samet.gunduz@mobilias.tech>
+Date:   Tue May 20 06:12:14 2025 +0300
+
+    feat: scale 3d model size
+
+[33mcommit a77169714c5d98daece095a50a00e35545803aba[m
+Author: samet.gunduz <samet.gunduz@mobilias.tech>
+Date:   Tue May 20 05:56:02 2025 +0300
+
+    feat: 3d face model for head pose visualization
+
+[33mcommit d303a5d78813b8632c241421f97c04b51b58c675[m
+Author: samet.gunduz <samet.gunduz@mobilias.tech>
+Date:   Tue May 20 03:53:40 2025 +0300
+
+    fix: improved visualization 3d head pose model
+
+[33mcommit c8c4b11718887fab983e7c6d5199e8a224093e30[m
+Author: samet.gunduz <samet.gunduz@mobilias.tech>
+Date:   Tue May 20 03:23:59 2025 +0300
+
+    feat: added 3d face model referance
+
+[33mcommit 90c034670f731b2a58dfbba5eaf77dc797050237[m
+Merge: 1c06983 a771697
+Author: Samet Gündüz <46328316+SametGundz@users.noreply.github.com>
+Date:   Tue May 20 02:56:59 2025 +0300
+
+    Merge pull request #11 from SametGundz/feat-3dfacemodel
+    
+    feat: 3d face model for head pose visualization
+
+[33mcommit 1c06983b33b010b6194ec8b28f9a7007f5c2285e[m
+Merge: c8c4b11 d303a5d
+Author: Samet Gündüz <46328316+SametGundz@users.noreply.github.com>
+Date:   Tue May 20 00:54:31 2025 +0300
+
+    Merge pull request #10 from SametGundz/feat-3dfacemodel
+    
+    fix: improved visualization 3d head pose model
+
+[33mcommit 8073fd9694754336b44f113326c783b7c6f4daa0[m
+Merge: befacd0 b61a97c
+Author: Samet Gündüz <46328316+SametGundz@users.noreply.github.com>
+Date:   Mon May 19 23:50:43 2025 +0300
+
+    Merge pull request #9 from SametGundz/feat-extended-graph
+    
+    Feat extended graph
+
+[33mcommit b61a97cd73810e1cc765612398c178284c2112f0[m[33m ([m[1;31morigin/feat-extended-graph[m[33m, [m[1;32mfeat-extended-graph[m[33m)[m
+Author: samet.gunduz <samet.gunduz@mobilias.tech>
+Date:   Tue May 20 02:41:43 2025 +0300
+
+    fix: improved fucntions
+
+[33mcommit 6867afec7c8221e9a6e1d0ca90216054c699fc41[m
+Author: samet.gunduz <samet.gunduz@mobilias.tech>
+Date:   Tue May 20 02:29:13 2025 +0300
+
+    fix: Improve the functions
+
+[33mcommit c869c7508aa6966963d781f5738ae1a5ad2e3110[m
+Author: samet.gunduz <samet.gunduz@mobilias.tech>
+Date:   Tue May 20 02:07:46 2025 +0300
+
+    fix: Removed some useless files.
+
+[33mcommit befacd015c988109e1a6b505f441278d12ffa154[m
+Merge: 7a0a734 c869c75
+Author: Samet Gündüz <46328316+SametGundz@users.noreply.github.com>
+Date:   Mon May 19 23:08:39 2025 +0300
+
+    Merge pull request #8 from SametGundz/feat-extended-graph
+    
+    fix: Removed some useless files.
+
+[33mcommit 852968a40236ac7030b22f77c100f105db855b9a[m
+Author: samet.gunduz <samet.gunduz@mobilias.tech>
+Date:   Mon May 19 20:26:53 2025 +0300
+
+    fix: incorrect draw gaze after enable landmark draw bug fixed
+
+[33mcommit 71dd81bb82b7be5345784c3b77d17e21cb90893c[m
+Author: samet.gunduz <samet.gunduz@mobilias.tech>
+Date:   Mon May 19 19:41:05 2025 +0300
+
+    fix: Fixed path, made some performance upgrades.
+
+[33mcommit 7a0a734976be574c7f046eb05a46c5e3baab7c36[m
+Merge: 333a956 852968a
+Author: Samet Gündüz <46328316+SametGundz@users.noreply.github.com>
+Date:   Mon May 19 17:28:04 2025 +0300
+
+    Merge pull request #7 from SametGundz/feat-extended-graph
+    
+    Feat extended graph
+
+[33mcommit d7b08358a38d3857b9aec73e2b2e038afaab42b9[m
+Author: samet.gunduz <samet.gunduz@mobilias.tech>
+Date:   Sun May 18 22:07:53 2025 +0300
+
+    feat: Normalize EAR values
+
+[33mcommit 7d88fe905a6866dc4870e0aae17657fc3f5905aa[m
+Author: samet.gunduz <samet.gunduz@mobilias.tech>
+Date:   Sun May 18 21:20:37 2025 +0300
+
+    Improved gaze and head-pose visualization
+
+[33mcommit 333a95646e5e994dbe950d0d5af87be6edf6702c[m
+Merge: 7d88fe9 d7b0835
+Author: Samet Gündüz <46328316+SametGundz@users.noreply.github.com>
+Date:   Sun May 18 19:09:51 2025 +0300
+
+    Merge pull request #6 from SametGundz/feat-extended-graph
+    
+    feat: Normalize EAR values
+
+[33mcommit b70882367000b5f2eb7be1931d42f3247f68049e[m
+Merge: 580768d 43c2133
+Author: Samet Gündüz <46328316+SametGundz@users.noreply.github.com>
+Date:   Sun May 18 17:44:19 2025 +0300
+
+    Merge pull request #5 from SametGundz/feat-evaulation-base
+    
+    Feat evaulation base
+
+[33mcommit 43c213328db13d4b2bc126cc375b2bfa0479c73a[m[33m ([m[1;31morigin/feat-evaulation-base[m[33m)[m
+Author: samet.gunduz <samet.gunduz@mobilias.tech>
+Date:   Sun May 18 20:43:27 2025 +0300
+
+    fix: Fixed the graph scaling feature
+
+[33mcommit 38fde062b186af19def5dc80a0c28fa9dbefbc8d[m
+Author: samet.gunduz <samet.gunduz@mobilias.tech>
+Date:   Sat May 17 00:03:09 2025 +0300
+
+    fix: path
+
+[33mcommit d46bb698960108dd1c214b8b28c3313b09282891[m
+Author: samet.gunduz <samet.gunduz@mobilias.tech>
+Date:   Fri May 16 23:46:07 2025 +0300
+
+    fix: Fix the head pose estimation
+
+[33mcommit 580768d12cb32b2b33cb853249b39fc565d53e09[m
+Merge: e546f5c d46bb69
+Author: Samet Gündüz <46328316+SametGundz@users.noreply.github.com>
+Date:   Fri May 16 20:54:05 2025 +0300
+
+    Merge pull request #4 from SametGundz/feat-evaulation-base
+    
+    fix: Fix the head pose estimation
+
+[33mcommit e546f5cb0fe4ce91390bbe5ed43adb4a06f69769[m
+Merge: 3e396f4 9643068
+Author: Samet Gündüz <46328316+SametGundz@users.noreply.github.com>
+Date:   Tue May 13 13:18:44 2025 +0300
+
+    Merge pull request #3 from SametGundz/feat-evaulation-base
+    
+    feat: Add evaultaion parameters but not finished yet.
+
+[33mcommit 96430682f8f2198312e90c41d33ba33d3f81a8bb[m
+Author: samet.gunduz <samet.gunduz@mobilias.tech>
+Date:   Tue May 13 13:17:57 2025 +0300
+
+    feat: Add evaultaion parameters but not finished yet.
+
+[33mcommit 3e396f44e16bf63cfe36c11f19f0007bd61423ce[m[33m ([m[1;32mfeat-3dmodel[m[33m)[m
+Merge: 4c1536d 70db4f9
+Author: Samet Gündüz <46328316+SametGundz@users.noreply.github.com>
+Date:   Mon May 5 01:37:42 2025 +0300
+
+    Merge pull request #2 from SametGundz/gui-gaze-draw
+    
+    feat: Implement gaze estimation on GUI
+
+[33mcommit 70db4f9bcf2e641868e38a9855a6179968ad4c08[m[33m ([m[1;31morigin/gui-gaze-draw[m[33m)[m
+Author: Samet <samet.gunduz@mobilias.tech>
+Date:   Mon May 5 04:37:02 2025 +0300
+
+    feat: Implement gaze estimation on GUI
+
+[33mcommit 4c1536db1cb12be9219e0fffc19b838459d11bc3[m
+Merge: 3c0f8c6 c155497
+Author: Samet Gündüz <46328316+SametGundz@users.noreply.github.com>
+Date:   Mon May 5 00:33:46 2025 +0300
+
+    Merge pull request #1 from SametGundz/feat-head-pose
+    
+    feat: Add gaze estimation
+
+[33mcommit c155497c0c53432b972fcfa16a4ec424956b5e4c[m[33m ([m[1;31morigin/feat-head-pose[m[33m)[m
+Author: Samet <samet.gunduz@mobilias.tech>
+Date:   Mon May 5 03:31:58 2025 +0300
+
+    feat: Add gaze estimation
+
+[33mcommit 3c0f8c6b3732af6ce6171da2f25adf3ba688388a[m[33m ([m[1;32mmain[m[33m)[m
+Author: Samet <samet.gunduz@mobilias.tech>
+Date:   Sun May 4 20:17:52 2025 +0300
+
+    Init commit
