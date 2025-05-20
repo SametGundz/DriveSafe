@@ -38,6 +38,7 @@ from src.utils.logger import DrowsinessLogger
 # Import gaze statistics recorder
 from src.detection.gaze_statistics import get_gaze_statistics_recorder
 from src.detection.gaze_zone_detector import get_gaze_zone_detector
+from src.detection.gaze_duration_monitor import get_gaze_duration_monitor, WarningLevel
 
 class DriverDrowsinessMainWindow(QMainWindow):
     """
@@ -64,15 +65,21 @@ class DriverDrowsinessMainWindow(QMainWindow):
         self.show_gaze = False
         self.show_gaze_zone = False
         self.current_gaze_zone = None
-        
-        # Camera settings
-        self.camera_id = 0
-        self.camera_width = 640
-        self.camera_height = 480
-        self.camera_fps = 30
+        self.gaze_duration_monitor = None
+        self.distraction_level = "NORMAL"
+        self.distraction_reasons = []
         
         # Load configuration
         self.config = load_ui_config()
+        
+        # Camera settings - ana konfigürasyon dosyasından al
+        self.camera_id = self.config.get('camera', {}).get('device_id', 0)
+        self.camera_width = self.config.get('camera', {}).get('width', 640)
+        self.camera_height = self.config.get('camera', {}).get('height', 480)
+        self.camera_fps = self.config.get('camera', {}).get('fps', 30)
+        
+        # UI konfigürasyonunu ayrıca sakla
+        self.ui_config = self.config.get('ui', {})
         
         # Set up logging
         self.logger = logging.getLogger(__name__)
@@ -117,14 +124,14 @@ class DriverDrowsinessMainWindow(QMainWindow):
         central widget, and status bar.
         """
         # Set window properties
-        self.setWindowTitle(self.config['window']['title'])
+        self.setWindowTitle(self.ui_config['window']['title'])
         self.resize(
-            self.config['window']['width'],
-            self.config['window']['height']
+            self.ui_config['window']['width'],
+            self.ui_config['window']['height']
         )
         self.setMinimumSize(
-            self.config['window']['min_width'],
-            self.config['window']['min_height']
+            self.ui_config['window']['min_width'],
+            self.ui_config['window']['min_height']
         )
         
         # Set application style to be minimalist and clean
@@ -206,7 +213,7 @@ class DriverDrowsinessMainWindow(QMainWindow):
     
     def _create_menu_bar(self):
         """Create the menu bar with File, View, and Help menus."""
-        self.menu_manager = MenuManager(self.config, self)
+        self.menu_manager = MenuManager(self.ui_config, self)
         self.setMenuBar(self.menu_manager)
         
         # Connect menu signals
@@ -227,12 +234,12 @@ class DriverDrowsinessMainWindow(QMainWindow):
         # Set main layout
         main_layout = QVBoxLayout(central_widget)
         main_layout.setContentsMargins(
-            self.config['layout']['margin'],
-            self.config['layout']['margin'],
-            self.config['layout']['margin'],
-            self.config['layout']['margin']
+            self.ui_config['layout']['margin'],
+            self.ui_config['layout']['margin'],
+            self.ui_config['layout']['margin'],
+            self.ui_config['layout']['margin']
         )
-        main_layout.setSpacing(self.config['layout']['spacing'])
+        main_layout.setSpacing(self.ui_config['layout']['spacing'])
         
         # Top area (video + 3D model + stats)
         top_layout = QHBoxLayout()
@@ -249,7 +256,7 @@ class DriverDrowsinessMainWindow(QMainWindow):
         video_container = QVBoxLayout()
         
         # Video panel
-        self.video_panel = VideoPanel(self.config)
+        self.video_panel = VideoPanel(self.ui_config)
         video_container.addWidget(self.video_panel)
         
         # Sol tarafta video paneli için bir container widget oluştur ve hizalamayı ayarla
@@ -263,7 +270,7 @@ class DriverDrowsinessMainWindow(QMainWindow):
         from src.ui.head_pose_model import Head3DPanel, HeadPoseModelWidget
         
         # 3D modelin kontrolleri için widget ve layout oluştur
-        self.head_pose_panel = Head3DPanel(self.config)
+        self.head_pose_panel = Head3DPanel(self.ui_config)
         # 3D modelin ana bölgede olması için boyut ayarlarını düzenle
         self.head_pose_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         # Merkezi bölgede 3D model için bir container oluştur
@@ -287,7 +294,7 @@ class DriverDrowsinessMainWindow(QMainWindow):
         right_container.setSpacing(10)
         
         # Metrics panel
-        self.metrics_panel = MetricsPanel(self.config)
+        self.metrics_panel = MetricsPanel(self.ui_config)
         # Daha kompakt bir görünüm için boyut politikasını ayarla
         self.metrics_panel.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         right_container.addWidget(self.metrics_panel)
@@ -379,7 +386,7 @@ class DriverDrowsinessMainWindow(QMainWindow):
         main_layout.addLayout(top_layout, 1)  # Top area should take more space
         
         # Kontrol paneli - daha kompakt bir görünüm için
-        self.control_panel = ControlPanel(self.config)
+        self.control_panel = ControlPanel(self.ui_config)
         main_layout.addWidget(self.control_panel, 0)  # Bottom control panel should take less space
         
         # Connect control panel signals
@@ -393,7 +400,7 @@ class DriverDrowsinessMainWindow(QMainWindow):
         self.control_panel.expand_charts_clicked.connect(self._show_expanded_charts)
         
         # Grafik paneli - başlık olmadan direkt paneli ekle
-        self.chart_panel = ChartPanel(self.config)
+        self.chart_panel = ChartPanel(self.ui_config)
         main_layout.addWidget(self.chart_panel, 0)  # Chart panel should take less space
         
         # Kontrol wrapper sinyal bağlantıları
@@ -409,7 +416,7 @@ class DriverDrowsinessMainWindow(QMainWindow):
         super().showEvent(event)
         
         # UI tam olarak yüklendikten sonra tam ekran yap
-        if self.config['window'].get('start_maximized', True):
+        if self.ui_config['window'].get('start_maximized', True):
             # QTimer kullanarak bir sonraki event loop'ta maximize yap
             QTimer.singleShot(0, self.showMaximized)
     
@@ -470,6 +477,10 @@ class DriverDrowsinessMainWindow(QMainWindow):
             
             # Initialize gaze statistics recorder
             self.gaze_stats_recorder = get_gaze_statistics_recorder()
+            
+            # Initialize GazeDurationMonitor
+            self.gaze_duration_monitor = get_gaze_duration_monitor()
+            self.logger.info("GazeDurationMonitor initialized")
             
             # Open camera
             self.cap = cv2.VideoCapture(self.camera_id)
@@ -532,11 +543,68 @@ class DriverDrowsinessMainWindow(QMainWindow):
         # Generate gaze statistics report if we have data
         if hasattr(self, 'gaze_stats_recorder'):
             try:
+                # Rapor oluşturmadan önce son durumları görelim
+                durations = self.gaze_stats_recorder.get_zone_durations()
+                percentages = self.gaze_stats_recorder.get_zone_percentages()
+                total_time = sum(durations.values())
+                
+                self.logger.info(f"Final gaze statistics - Total time: {total_time:.2f}s")
+                self.logger.info(f"Zone durations: {durations}")
+                self.logger.info(f"Zone percentages: {percentages}")
+                
+                # Rapor oluştur
+                self.logger.info("Generating gaze statistics report...")
                 report_files = self.gaze_stats_recorder.generate_report()
-                self.logger.info(f"Gaze statistics report generated: {report_files}")
-                self.update_status(f"Bakış bölgesi istatistikleri kaydedildi: {report_files['csv']}")
+                
+                if report_files and 'csv' in report_files:
+                    session_folder = os.path.dirname(report_files['csv'])
+                    self.logger.info(f"Gaze statistics report files: {report_files}")
+                    self.update_status(f"Gaze statistics saved to: {session_folder}")
+                else:
+                    self.logger.warning("Gaze statistics report generation failed or returned no paths")
+                    self.update_status("Failed to generate gaze statistics report")
             except Exception as e:
                 self.logger.error(f"Error generating gaze statistics report: {str(e)}")
+                import traceback
+                self.logger.error(traceback.format_exc())
+                self.update_status("Error generating gaze statistics report")
+        
+        # Generate gaze duration monitor report if we have data
+        if hasattr(self, 'gaze_duration_monitor') and self.gaze_duration_monitor is not None:
+            try:
+                now = time.time()
+                self.logger.info("Generating distraction report...")
+                report_paths = self.gaze_duration_monitor.save_report_to_file(now)
+                if report_paths:
+                    # Eğer PDF rapor varsa, onun klasörünü kullan
+                    if isinstance(report_paths, dict) and 'pdf' in report_paths:
+                        session_folder = os.path.dirname(report_paths['pdf'])
+                        self.logger.info(f"Distraction report saved to: {report_paths['pdf']}")
+                    # Eğer JSON rapor varsa, onun klasörünü kullan
+                    elif isinstance(report_paths, dict) and 'json' in report_paths:
+                        session_folder = os.path.dirname(report_paths['json'])
+                        self.logger.info(f"Distraction report saved to: {report_paths['json']}")
+                    # Geriye uyumluluk için - string döndürürse
+                    elif isinstance(report_paths, str):
+                        session_folder = os.path.dirname(report_paths)
+                        self.logger.info(f"Distraction report saved to: {report_paths}")
+                    else:
+                        session_folder = None
+                    
+                    # Eğer geçerli bir klasör yolu varsa, bilgiyi göster
+                    if session_folder:
+                        self.update_status(f"Distraction report saved to: {session_folder}")
+                    else:
+                        self.logger.warning("Could not determine session folder from report paths")
+                        self.update_status("Distraction report generated successfully")
+                else:
+                    self.logger.warning("Distraction report generation failed or returned no path")
+                    self.update_status("Failed to generate distraction report")
+            except Exception as e:
+                self.logger.error(f"Error generating gaze duration report: {str(e)}")
+                import traceback
+                self.logger.error(traceback.format_exc())
+                self.update_status("Error generating distraction report")
         
         # Stop timers
         if self.camera_timer.isActive():
@@ -725,29 +793,32 @@ class DriverDrowsinessMainWindow(QMainWindow):
                         (ear is None or ear >= ear_threshold)):
                     pitch, yaw = np.rad2deg(self.mediapipe_helper.gaze_detector._last_gaze_vector)
                     
-                    # Bakış yönü metnini oluştur
+                    # Bakış yönü metnini oluştur - İngilizce olarak
                     pitch_yaw_text = f"Pitch: {pitch:.1f}° Yaw: {yaw:.1f}°"
                     font = cv2.FONT_HERSHEY_SIMPLEX
-                    font_scale = 0.5  # FPS ile aynı boyut
-                    thickness = 1     # FPS ile aynı kalınlık
-                    font_color = (0, 255, 255)  # FPS ile aynı renk
+                    font_scale = 0.4  # Daha küçük
+                    thickness = 1
+                    font_color = (0, 255, 255)
                     
                     # Metin boyutunu al
                     (text_width, text_height), baseline = cv2.getTextSize(pitch_yaw_text, font, font_scale, thickness)
                     
-                    # Sol üst köşe pozisyonu
-                    text_x = 10
-                    text_y = 30
+                    # Sağ alt köşe pozisyonu
+                    text_x = processed_frame.shape[1] - text_width - 10
+                    text_y = processed_frame.shape[0] - 10
                     
-                    # Arka plan kutusu çiz
+                    # Yarı saydam arka plan kutusu çiz
                     padding = 5
+                    overlay = processed_frame.copy()
                     cv2.rectangle(
-                        processed_frame,
+                        overlay,
                         (text_x - padding, text_y - text_height - padding),
                         (text_x + text_width + padding, text_y + padding),
-                        (0, 0, 0),  # Siyah
-                        -1  # Dolu
+                        (0, 0, 0),
+                        -1
                     )
+                    # Şeffaflık uygula
+                    cv2.addWeighted(overlay, 0.6, processed_frame, 0.4, 0, processed_frame)
                     
                     # Pitch ve Yaw yazısını ekle
                     cv2.putText(
@@ -760,20 +831,58 @@ class DriverDrowsinessMainWindow(QMainWindow):
                         thickness
                     )
                 
-                # Bakış bölgesi tespiti ve görselleştirme
-                if self.show_gaze_zone:
-                    # Sadece gaze vector geçerli ise ve gözler açıksa göster
-                    if (hasattr(self.mediapipe_helper.gaze_detector, '_last_gaze_vector') and 
-                            self.mediapipe_helper.gaze_detector._last_gaze_vector is not None and 
-                            (ear is None or ear >= ear_threshold)):
-                        gaze_vector = self.mediapipe_helper.gaze_detector._last_gaze_vector
-                        zone_id = self.mediapipe_helper.gaze_detector.get_gaze_target_zone(gaze_vector)
-                        self.current_gaze_zone = zone_id
+                # GAZE ZONE TESPİTİ VE KAYIT - Her durumda yap (show_gaze veya show_gaze_zone durumundan bağımsız)
+                # Sadece gaze vector geçerli ise ve gözler açıksa işlem yap
+                ear_threshold = self.config.get('detection', {}).get('ear_threshold', 0.21)
+                if (hasattr(self.mediapipe_helper.gaze_detector, '_last_gaze_vector') and 
+                        self.mediapipe_helper.gaze_detector._last_gaze_vector is not None and 
+                        (ear is None or ear >= ear_threshold)):
+                    
+                    # Bakış vektörü alınıyor
+                    gaze_vector = self.mediapipe_helper.gaze_detector._last_gaze_vector
+                    
+                    # Basitleştirilmiş yaklaşım: GazeZoneDetector, zone_durations'ı otomatik olarak güncelleyecek
+                    zone_id = self.mediapipe_helper.gaze_detector.get_gaze_target_zone(gaze_vector)
+                    self.current_gaze_zone = zone_id
+                    
+                    # Tespit edilen bölgeyi istatistiklerde kaydet - sadece geçerli bir bölge varsa
+                    if hasattr(self, 'gaze_stats_recorder') and zone_id is not None:
+                        # İstatistiklere ekle - süre hesabı GazeZoneDetector tarafında yapılacak
+                        self.gaze_stats_recorder.record_gaze_zone(zone_id)
                         
-                        # Tespit edilen bölgeyi istatistiklerde kaydet
-                        if hasattr(self, 'gaze_stats_recorder'):
-                            self.gaze_stats_recorder.record_gaze_zone(zone_id)
+                        # Her 300 kayıtta bir (yaklaşık 10 saniyede bir) zone durations'ı log'a yaz
+                        if getattr(self, '_gaze_record_counter', 0) % 300 == 0:
+                            durations = self.gaze_stats_recorder.get_zone_durations()
+                            percentages = self.gaze_stats_recorder.get_zone_percentages()
+                            total_time = sum(durations.values())
+                            self.logger.info(f"Total recorded gaze time: {total_time:.2f}s")
+                            self.logger.info(f"Current zone durations: {durations}")
+                            self.logger.info(f"Current zone percentages: {percentages}")
                         
+                        # Sayacı artır
+                        self._gaze_record_counter = getattr(self, '_gaze_record_counter', 0) + 1
+                    
+                    # GazeDurationMonitor ile bakış sürelerini takip et - her zaman takip et
+                    if hasattr(self, 'gaze_duration_monitor') and self.gaze_duration_monitor is not None and zone_id is not None:
+                        try:
+                            # Dalgınlık analizi
+                            monitor_result = self.gaze_duration_monitor.update(zone_id, time.time())
+                            
+                            # Dalgınlık seviyesi ve nedenlerini sakla
+                            self.distraction_level = monitor_result["distraction_level"]
+                            if "warning" in monitor_result and "reasons" in monitor_result["warning"]:
+                                self.distraction_reasons = monitor_result["warning"]["reasons"]
+                            else:
+                                self.distraction_reasons = []
+                            
+                            # Dalgınlık seviyesine göre uyarı göster
+                            if self.distraction_level != "NORMAL":
+                                self.logger.warning(f"Distraction detected: {self.distraction_level} - {self.distraction_reasons}")
+                        except Exception as e:
+                            self.logger.error(f"Error updating gaze duration monitor: {str(e)}")
+                    
+                    # Bakış bölgesi görselleştirme - sadece show_gaze_zone etkinse göster
+                    if self.show_gaze_zone:
                         # Bölge adını al
                         zone_detector = get_gaze_zone_detector()
                         zone_name = zone_detector.get_zone_name(zone_id)
@@ -781,29 +890,38 @@ class DriverDrowsinessMainWindow(QMainWindow):
                         # Pitch ve yaw değerlerini alalım
                         pitch, yaw = np.rad2deg(gaze_vector)
                         
-                        # Bakış bölgesi metnini oluştur - Türkçe karakter sorununu önlemek için İngilizce kullan
+                        # Bakış bölgesi metnini oluştur - İngilizce olarak
                         if zone_id is not None:
                             gaze_zone_text = f"Gaze Zone: {zone_name} ({zone_id})"
                         else:
                             # Bölge bilinmiyorsa açı değerlerini göster
-                            gaze_zone_text = f"Undefined zone: Pitch={pitch:.1f}°, Yaw={yaw:.1f}°"
+                            gaze_zone_text = f"Undefined zone: P={pitch:.1f}°, Y={yaw:.1f}°"
+                        
+                        # Metin ayarları
+                        font = cv2.FONT_HERSHEY_SIMPLEX
+                        font_scale = 0.4  # Daha küçük, pitch/yaw ile aynı
+                        thickness = 1
+                        font_color = (0, 255, 255)
                         
                         # Metin boyutunu al
                         (text_width, text_height), baseline = cv2.getTextSize(gaze_zone_text, font, font_scale, thickness)
                         
-                        # Sol üst köşe pozisyonu - pitch/yaw metninin altında
+                        # Sol alt köşe pozisyonu
                         text_x = 10
-                        text_y = 60
+                        text_y = processed_frame.shape[0] - 10
                         
-                        # Arka plan kutusu çiz
+                        # Yarı saydam arka plan kutusu çiz
                         padding = 5
+                        overlay = processed_frame.copy()
                         cv2.rectangle(
-                            processed_frame,
+                            overlay,
                             (text_x - padding, text_y - text_height - padding),
                             (text_x + text_width + padding, text_y + padding),
-                            (0, 0, 0),  # Siyah
-                            -1  # Dolu
+                            (0, 0, 0),
+                            -1
                         )
+                        # Şeffaflık uygula
+                        cv2.addWeighted(overlay, 0.6, processed_frame, 0.4, 0, processed_frame)
                         
                         # Bakış bölgesi yazısını ekle
                         cv2.putText(
@@ -872,6 +990,90 @@ class DriverDrowsinessMainWindow(QMainWindow):
                 show_metrics=False
             )
             
+            # Dalgınlık uyarısını göster (GazeDurationMonitor'dan)
+            if hasattr(self, 'distraction_level') and self.distraction_level != "NORMAL":
+                # Uyarı rengi belirle
+                if self.distraction_level == "CRITICAL":
+                    warning_color = (0, 0, 255)  # Kırmızı (BGR)
+                else:  # WARNING
+                    warning_color = (0, 165, 255)  # Turuncu (BGR)
+                
+                # Uyarı metni - İngilizce olarak değiştir
+                warning_text = f"DISTRACTION: {self.distraction_level}"
+                
+                # Metin özellikleri - Daha küçük metin
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                font_scale = 0.6  # Daha küçük yazı boyutu
+                thickness = 1  # Daha ince çizgi
+                
+                # Metni yerleştirme
+                text_size = cv2.getTextSize(warning_text, font, font_scale, thickness)[0]
+                text_x = (processed_frame.shape[1] - text_size[0]) // 2  # Yatayda ortala
+                text_y = 30  # Üstten mesafe
+                
+                # Arkaplan dikdörtgeni - Yarı şeffaf arka plan
+                padding = 5  # Daha az padding
+                overlay = processed_frame.copy()
+                cv2.rectangle(
+                    overlay,
+                    (text_x - padding, text_y - text_size[1] - padding),
+                    (text_x + text_size[0] + padding, text_y + padding),
+                    (0, 0, 0),  # Siyah arkaplan
+                    -1
+                )
+                # Şeffaflık uygula (alpha = 0.6)
+                cv2.addWeighted(overlay, 0.6, processed_frame, 0.4, 0, processed_frame)
+                
+                # Uyarı metni
+                cv2.putText(
+                    processed_frame,
+                    warning_text,
+                    (text_x, text_y),
+                    font,
+                    font_scale,
+                    warning_color,
+                    thickness
+                )
+                
+                # Uyarı nedenlerini göster
+                if hasattr(self, 'distraction_reasons') and self.distraction_reasons:
+                    # Daha küçük font
+                    font_scale_reason = 0.4
+                    thickness_reason = 1
+                    
+                    # Her neden için - maksimum 2 neden göster
+                    y_pos = text_y + 20
+                    for i, reason in enumerate(self.distraction_reasons[:2]):  # En fazla 2 neden göster
+                        # Doğrudan İngilizce gelen metni kullan
+                        reason_text = f"- {reason}"
+                        text_size_reason = cv2.getTextSize(reason_text, font, font_scale_reason, thickness_reason)[0]
+                        reason_x = (processed_frame.shape[1] - text_size_reason[0]) // 2  # Yatayda ortala
+                        
+                        # Arkaplan dikdörtgeni - Yarı şeffaf
+                        overlay = processed_frame.copy()
+                        cv2.rectangle(
+                            overlay,
+                            (reason_x - padding, y_pos - text_size_reason[1] - padding),
+                            (reason_x + text_size_reason[0] + padding, y_pos + padding),
+                            (0, 0, 0),  # Siyah arkaplan
+                            -1
+                        )
+                        # Şeffaflık uygula (alpha = 0.6)
+                        cv2.addWeighted(overlay, 0.6, processed_frame, 0.4, 0, processed_frame)
+                        
+                        # Neden metni
+                        cv2.putText(
+                            processed_frame,
+                            reason_text,
+                            (reason_x, y_pos),
+                            font,
+                            font_scale_reason,
+                            warning_color,
+                            thickness_reason
+                        )
+                        
+                        y_pos += 15  # Satırlar arası daha az boşluk
+            
             # İşlenmiş kareyi kullan
             frame = processed_frame
         
@@ -884,26 +1086,29 @@ class DriverDrowsinessMainWindow(QMainWindow):
             # FPS metni
             fps_text = f"FPS: {current_fps:.1f}"
             font = cv2.FONT_HERSHEY_SIMPLEX
-            font_scale = 0.5  # Daha küçük font
-            thickness = 1     # Daha ince font
-            font_color = (0, 255, 255)  # Sarı-yeşil renk
+            font_scale = 0.4  # Daha küçük
+            thickness = 1
+            font_color = (0, 255, 255)
             
             # Metin boyutunu al
             (text_width, text_height), baseline = cv2.getTextSize(fps_text, font, font_scale, thickness)
             
-            # Sağ alt köşe pozisyonu
-            text_x = frame.shape[1] - text_width - 10
-            text_y = frame.shape[0] - 10
+            # Sol üst köşe pozisyonu
+            text_x = 10
+            text_y = 20
             
-            # Arka plan kutusu çiz
+            # Yarı saydam arka plan kutusu çiz
             padding = 5
+            overlay = frame.copy()
             cv2.rectangle(
-                frame,
+                overlay,
                 (text_x - padding, text_y - text_height - padding),
                 (text_x + text_width + padding, text_y + padding),
-                (0, 0, 0),  # Siyah
-                -1  # Dolu
+                (0, 0, 0),
+                -1
             )
+            # Şeffaflık uygula
+            cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
             
             # FPS yazısını ekle
             cv2.putText(
@@ -948,7 +1153,7 @@ class DriverDrowsinessMainWindow(QMainWindow):
     
     def on_settings(self):
         """Show settings dialog."""
-        dialog = SettingsDialog(self.config, self)
+        dialog = SettingsDialog(self.ui_config, self)
         dialog.exec()
     
     def on_about(self):
@@ -979,7 +1184,7 @@ class DriverDrowsinessMainWindow(QMainWindow):
         if hasattr(self, 'expanded_charts_window') and self.expanded_charts_window.isVisible():
             self.expanded_charts_window.activateWindow()
         else:
-            self.expanded_charts_window = ExpandedChartsWindow(self.config, parent=self)
+            self.expanded_charts_window = ExpandedChartsWindow(self.ui_config, parent=self)
             
             # Pencere kapatıldığında ana grafikleri tekrar etkinleştirmek için sinyal bağlantısı
             self.expanded_charts_window.closeEvent = self._on_expanded_charts_close

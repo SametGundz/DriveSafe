@@ -24,43 +24,34 @@ class GazeZoneDetector:
     Bu sınıf, gaze detector'dan alınan bakış açılarını kullanarak
     sürücünün araç içindeki hangi bölgeye baktığını tespit eder.
     
-    Bölge tanımları:
-    - 0: Right Side - sağ ekstrem
-    - 1: Right Top - sağ üst açı
-    - 2: Right Windshield - sağda, yukarıda
-    - 3: Steering Wheel - merkezde, aşağıda
-    - 4: Rear Mirror - orta üstte
-    - 5: Center Console - orta konsol
-    - 6: Left Windshield - solda, yukarıda
-    - 7: Left Bottom - sol alt
-    - 8: Left Side - sol ekstrem
+    AB regülasyonu C(2023)4523'e uygun şekilde bölge tanımları:
+    - 0: Road Center - Yol merkezi (Alan 2)
+    - 1: Driving Instruments - Gösterge paneli (Alan 2)
+    - 2: Infotainment - Eğlence sistemi (Alan 1)
+    - 3: Left Side - Sol yan cam ve ayna (Alan 2)
+    - 4: Right Side - Sağ yan cam ve ayna (Alan 2)
+    - 5: Rear Mirror - Dikiz aynası (Alan 2)
     """
     
     # Bölge tanımları - (yaw_min, yaw_max, pitch_min, pitch_max)
-    # Açı değerleri derece cinsindendir
+    # Açı değerleri derece cinsindendir, GazeDurationMonitor sınıfıyla uyumlu
     ZONES = {
-        0: (35, 90, -20, 20),     # Right Side - sağ ekstrem
-        1: (20, 40, 5, 45),       # Right Top - sağ üst açı
-        2: (0, 30, -5, 25),       # Right Windshield - sağda, yukarıda
-        3: (-15, 15, -30, 0),     # Steering Wheel - merkezde, aşağıda
-        4: (-10, 10, 0, 30),      # Rear Mirror - orta üstte
-        5: (-20, 0, -25, 5),      # Center Console - orta konsol
-        6: (-30, 0, 0, 25),       # Left Windshield - solda, yukarıda
-        7: (-40, -15, -25, -5),   # Left Bottom - sol alt
-        8: (-90, -35, -20, 20),   # Left Side - sol ekstrem
+        0: (-15, 15, -15, 15),     # Road Center - Yol merkezi
+        1: (-15, 15, -40, -15),    # Driving Instruments - Gösterge paneli
+        2: (-15, 15, -70, -40),    # Infotainment - Eğlence sistemi
+        3: (15, 90, -40, 40),      # Left Side - Sol yan cam ve ayna
+        4: (-90, -15, -40, 40),    # Right Side - Sağ yan cam ve ayna
+        5: (-15, 15, 15, 40)       # Rear Mirror - Dikiz aynası
     }
     
-    # Bölge adları
+    # Bölge adları - GazeDurationMonitor sınıfıyla uyumlu
     ZONE_NAMES = [
-        "Right Side",      # 0
-        "Right Top",       # 1
-        "Right Windshield",# 2
-        "Steering Wheel",  # 3
-        "Rear Mirror",     # 4
-        "Center Console",  # 5
-        "Left Windshield", # 6
-        "Left Bottom",     # 7
-        "Left Side"        # 8
+        "Road Center",         # 0
+        "Driving Instruments", # 1
+        "Infotainment",        # 2
+        "Left Side",           # 3
+        "Right Side",          # 4
+        "Rear Mirror"          # 5
     ]
     
     def __init__(self, history_size: int = 10, stability_threshold: float = 0.5):
@@ -117,9 +108,11 @@ class GazeZoneDetector:
             # Önceki bölgede geçen süreyi kaydet
             if self.current_zone is not None:
                 duration = timestamp - self.zone_start_time
-                self.zone_durations[self.current_zone] += duration
-                logger.debug(f"Zone change: {self.current_zone} -> {stable_zone}, "
-                            f"duration: {duration:.2f}s")
+                if duration > 0:  # Negatif süreler oluşmasını önle
+                    self.zone_durations[self.current_zone] += duration
+                    logger.debug(f"Zone change: {self.get_zone_name(self.current_zone)} -> {self.get_zone_name(stable_zone)}, "
+                               f"duration: {duration:.2f}s")
+                    logger.debug(f"Updated zone durations: {self.zone_durations}")
             
             self.current_zone = stable_zone
             self.zone_start_time = timestamp
@@ -139,14 +132,44 @@ class GazeZoneDetector:
             Optional[int]: Bölge ID'si veya None
         """
         # Açıları konsola yazdır (debug için)
-        logger.debug(f"Gaze angles - Pitch: {pitch:.2f}°, Yaw: {yaw:.2f}°")
+        logger.info(f"Gaze angles - Pitch: {pitch:.2f}°, Yaw: {yaw:.2f}°")
         
-        for zone_id, (yaw_min, yaw_max, pitch_min, pitch_max) in self.ZONES.items():
-            if yaw_min <= yaw <= yaw_max and pitch_min <= pitch <= pitch_max:
-                return zone_id
+        # AÇILARIN RANGE DIŞINA ÇIKTIĞI DURUMU TEST ET
+        if pitch < -70 or pitch > 40 or yaw < -90 or yaw > 90:
+            logger.warning(f"Angles out of expected range - Pitch: {pitch:.2f}°, Yaw: {yaw:.2f}°")
+        
+        # Road Center (zone 0): -15 <= yaw <= 15, -15 <= pitch <= 15
+        if -15 <= yaw <= 15 and -15 <= pitch <= 15:
+            logger.debug("Matching Zone 0: Road Center")
+            return 0
+            
+        # Driving Instruments (zone 1): -15 <= yaw <= 15, -40 <= pitch < -15
+        if -15 <= yaw <= 15 and -40 <= pitch < -15:
+            logger.debug("Matching Zone 1: Driving Instruments")
+            return 1
+        
+        # Infotainment (zone 2): -15 <= yaw <= 15, -70 <= pitch < -40
+        if -15 <= yaw <= 15 and -70 <= pitch < -40:
+            logger.debug("Matching Zone 2: Infotainment")
+            return 2
+            
+        # Left Side (zone 3): 15 < yaw <= 90, -40 <= pitch <= 40
+        if 15 < yaw <= 90 and -40 <= pitch <= 40:
+            logger.debug("Matching Zone 3: Left Side")
+            return 3
+            
+        # Right Side (zone 4): -90 <= yaw < -15, -40 <= pitch <= 40
+        if -90 <= yaw < -15 and -40 <= pitch <= 40:
+            logger.debug("Matching Zone 4: Right Side")
+            return 4
+            
+        # Rear Mirror (zone 5): -15 <= yaw <= 15, 15 < pitch <= 40
+        if -15 <= yaw <= 15 and 15 < pitch <= 40:
+            logger.debug("Matching Zone 5: Rear Mirror")
+            return 5
         
         # Tanımlı bölgelerin dışında
-        logger.debug(f"No matching zone for Pitch: {pitch:.2f}°, Yaw: {yaw:.2f}°")
+        logger.warning(f"No matching zone for Pitch: {pitch:.2f}°, Yaw: {yaw:.2f}°")
         return None
     
     def _get_stable_zone(self) -> Optional[int]:
@@ -187,11 +210,19 @@ class GazeZoneDetector:
         Returns:
             Dict[int, float]: Bölge ID'leri ve süreleri (saniye)
         """
-        # Eğer hala bir bölgeye bakılıyorsa mevcut süreyi de ekle
+        # Mevcut durum için süreleri kopyala
         current_stats = self.zone_durations.copy()
+        
+        # Eğer hala bir bölgeye bakılıyorsa, o bölgedeki son süreyi de ekle
         if self.current_zone is not None:
-            current_duration = time.time() - self.zone_start_time
-            current_stats[self.current_zone] += current_duration
+            current_time = time.time()
+            current_duration = current_time - self.zone_start_time
+            if current_duration > 0:  # Negatif değer olmadığından emin ol
+                current_stats[self.current_zone] += current_duration
+        
+        # Sonuçları logla
+        total_time = sum(current_stats.values())
+        logger.info(f"Total gaze time: {total_time:.2f}s, Zone statistics: {current_stats}")
         
         return current_stats
     
@@ -216,6 +247,43 @@ class GazeZoneDetector:
         self.zone_start_time = time.time()
         self.zone_durations = {i: 0 for i in range(len(self.ZONES))}
         logger.info("GazeZoneDetector reset")
+
+    def get_gaze_target_zone(self, gaze_vector: np.ndarray) -> Optional[int]:
+        """
+        Bakış vektörünü kullanarak hedef bölgeyi belirler.
+        
+        Args:
+            gaze_vector: Bakış vektörü [pitch, yaw]
+            
+        Returns:
+            Optional[int]: Bölge ID'si veya None
+        """
+        if gaze_vector is None or len(gaze_vector) < 2:
+            return None
+        
+        # Radyan açıları dereceye çevir
+        pitch, yaw = np.rad2deg(gaze_vector)
+        
+        # Açıları kullanarak bölgeyi tespit et
+        zone_id = self._get_zone_from_angles(pitch, yaw)
+        
+        # Basitçe bölge değişimini takip et ve süreyi kaydet
+        current_time = time.time()
+        
+        # Eğer yeni bir bölgeye bakılmaya başlandıysa
+        if zone_id != self.current_zone:
+            # Önceki bölgede geçirilen süreyi kaydet
+            if self.current_zone is not None:
+                duration = current_time - self.zone_start_time
+                if duration > 0:  # Negatif süre olmadığından emin ol
+                    self.zone_durations[self.current_zone] += duration
+                    logger.info(f"Zone change: {self.get_zone_name(self.current_zone)} -> {self.get_zone_name(zone_id)}, duration: {duration:.2f}s")
+            
+            # Yeni bölge için zamanı sıfırla
+            self.current_zone = zone_id
+            self.zone_start_time = current_time
+        
+        return zone_id
 
 
 # Singleton pattern için global instance
