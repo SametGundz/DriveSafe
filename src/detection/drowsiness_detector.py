@@ -157,17 +157,32 @@ class DrowsinessDetector:
         # Calculate overall drowsiness level
         drowsiness_level = self._calculate_drowsiness_level()
         
+        # Determine drowsiness state based on level
+        if drowsiness_level < 0.3:
+            drowsiness_state = "Alert"
+            drowsiness_color = (0, 255, 0)  # Green
+        elif drowsiness_level < 0.6:
+            drowsiness_state = "Tired"
+            drowsiness_color = (0, 165, 255)  # Orange
+        elif drowsiness_level < 0.8:
+            drowsiness_state = "Drowsy"
+            drowsiness_color = (0, 0, 255)  # Red
+        else:
+            drowsiness_state = "Danger"
+            drowsiness_color = (0, 0, 255)  # Red
+        
         # Update alert status
         self._update_alert_status(drowsiness_level, current_time)
         
         # Log drowsiness state if alert is active
         if self.state.alert_active:
-            logger.warning(f"DROWSINESS ALERT! Level: {drowsiness_level:.2f}, EAR: {ear_value:.2f}, "
+            logger.warning(f"DROWSINESS ALERT! Level: {drowsiness_level:.2f}, State: {drowsiness_state}, EAR: {ear_value:.2f}, "
                           f"PERCLOS: {self.state.perclos:.2f}")
         
         # Return current state
         return {
             'drowsiness_level': drowsiness_level,
+            'drowsiness_state': drowsiness_state,
             'ear_value': ear_value,
             'perclos': self.state.perclos,
             'eyes_closed_duration': self.state.eyes_closed_duration,
@@ -444,15 +459,18 @@ class DrowsinessDetector:
         # Calculate drowsiness level
         drowsiness_level = self._calculate_drowsiness_level()
         
-        # Add drowsiness level
+        # Determine drowsiness state based on level
         if drowsiness_level < 0.3:
             drowsiness_state = "Alert"
             drowsiness_color = (0, 255, 0)  # Green
         elif drowsiness_level < 0.6:
             drowsiness_state = "Tired"
             drowsiness_color = (0, 165, 255)  # Orange
-        else:
+        elif drowsiness_level < 0.8:
             drowsiness_state = "Drowsy"
+            drowsiness_color = (0, 0, 255)  # Red
+        else:
+            drowsiness_state = "Danger"
             drowsiness_color = (0, 0, 255)  # Red
             
         drowsiness_text = f"Drowsiness: {drowsiness_level:.2f} - {drowsiness_state}"

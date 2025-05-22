@@ -110,7 +110,7 @@ class TestDrowsinessDetector(unittest.TestCase):
         
         # Check results
         self.assertFalse(result["is_eyes_closed"])
-        self.assertEqual(result["drowsiness_state"], "Uyanık")
+        self.assertEqual(result["drowsiness_state"], "Alert")
         self.assertLess(result["drowsiness_level"], 0.3)
         
         # Update with closed eyes
@@ -120,7 +120,7 @@ class TestDrowsinessDetector(unittest.TestCase):
         self.assertTrue(result["is_eyes_closed"])
         
         # Eyes just closed, so drowsiness level should still be low
-        self.assertEqual(result["drowsiness_state"], "Uyanık")
+        self.assertEqual(result["drowsiness_state"], "Alert")
         
         # Simulate eyes closed for a longer period
         self.detector.eyes_closed_start_time = self.detector.last_update_time - 1.5  # 1.5 seconds
@@ -171,26 +171,35 @@ class TestDrowsinessDetector(unittest.TestCase):
         """
         Farklı uykululuk seviyeleri için tespit durumunu test eder.
         """
-        # Helper function to directly set drowsiness level
-        def set_level(level):
-            self.detector.drowsiness_level = level
-            return self.detector.update(ear_left=0.3, ear_right=0.3)
+        # Helper function to mock drowsiness levels
+        def mock_drowsiness(level):
+            # Patch the _calculate_drowsiness_level method to return our desired level
+            original_method = self.detector._calculate_drowsiness_level
+            self.detector._calculate_drowsiness_level = lambda: level
+            
+            # Call update to get the result
+            result = self.detector.update(ear_value=0.3)
+            
+            # Restore the original method
+            self.detector._calculate_drowsiness_level = original_method
+            
+            return result
         
         # Test "Uyanık" level
-        result = set_level(0.2)
-        self.assertEqual(result["drowsiness_state"], "Uyanık")
+        result = mock_drowsiness(0.2)
+        self.assertEqual(result["drowsiness_state"], "Alert")
         
         # Test "Yorgun" level
-        result = set_level(0.4)
-        self.assertEqual(result["drowsiness_state"], "Yorgun")
+        result = mock_drowsiness(0.4)
+        self.assertEqual(result["drowsiness_state"], "Tired")
         
         # Test "Uykulu" level
-        result = set_level(0.7)
-        self.assertEqual(result["drowsiness_state"], "Uykulu")
+        result = mock_drowsiness(0.7)
+        self.assertEqual(result["drowsiness_state"], "Drowsy")
         
         # Test "Tehlikeli" level
-        result = set_level(0.9)
-        self.assertEqual(result["drowsiness_state"], "Tehlikeli")
+        result = mock_drowsiness(0.9)
+        self.assertEqual(result["drowsiness_state"], "Danger")
 
 if __name__ == "__main__":
     unittest.main() 
