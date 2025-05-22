@@ -20,6 +20,7 @@ class MenuManager(QMenuBar):
     """
     
     # Signals
+    upload_video_triggered = pyqtSignal()
     start_triggered = pyqtSignal()
     stop_triggered = pyqtSignal()
     settings_triggered = pyqtSignal()
@@ -75,6 +76,12 @@ class MenuManager(QMenuBar):
         file_menu = self.addMenu("Dosya")
         
         # File menu actions
+        upload_video_action = QAction("Video Yükle", self)
+        upload_video_action.triggered.connect(self.upload_video_triggered)
+        file_menu.addAction(upload_video_action)
+        
+        file_menu.addSeparator()
+        
         start_action = QAction("Başlat", self)
         start_action.triggered.connect(self.start_triggered)
         file_menu.addAction(start_action)

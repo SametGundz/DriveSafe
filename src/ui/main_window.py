@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 import numpy as np
 
-from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QStatusBar, QLabel, QSizePolicy, QSlider, QCheckBox, QPushButton
+from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QStatusBar, QLabel, QSizePolicy, QSlider, QCheckBox, QPushButton, QDialog, QMessageBox, QTextEdit
 from PyQt6.QtCore import Qt, QTimer, QSize
 from PyQt6.QtGui import QFont, QPixmap, QImage
 
@@ -31,6 +31,7 @@ from src.ui.chart_panel import ChartPanel
 from src.ui.menu_manager import MenuManager
 from src.ui.dialogs import SettingsDialog, AboutDialog
 from src.ui.graph_utils import ExpandedChartsWindow, create_chart_data_from_series
+from src.ui.video_upload_widget import VideoUploadWidget  # Import the VideoUploadWidget
 
 # Import logger for application
 from src.utils.logger import DrowsinessLogger
@@ -39,6 +40,9 @@ from src.utils.logger import DrowsinessLogger
 from src.detection.gaze_statistics import get_gaze_statistics_recorder
 from src.detection.gaze_zone_detector import get_gaze_zone_detector
 from src.detection.gaze_duration_monitor import get_gaze_duration_monitor, WarningLevel
+
+# Import video analyzer
+from src.analysis.video_analyzer import VideoAnalyzer, FrameData
 
 class DriverDrowsinessMainWindow(QMainWindow):
     """
@@ -217,6 +221,7 @@ class DriverDrowsinessMainWindow(QMainWindow):
         self.setMenuBar(self.menu_manager)
         
         # Connect menu signals
+        self.menu_manager.upload_video_triggered.connect(self.on_upload_video)  # Connect the new signal
         self.menu_manager.start_triggered.connect(self.on_start)
         self.menu_manager.stop_triggered.connect(self.on_stop)
         self.menu_manager.settings_triggered.connect(self.on_settings)
@@ -731,7 +736,13 @@ class DriverDrowsinessMainWindow(QMainWindow):
                 # Get the drowsiness level from the detector
                 drowsiness_level = 0
                 if hasattr(self, 'drowsiness_detector'):
-                    drowsiness_level = getattr(self.drowsiness_detector, 'drowsiness_level', 0)
+                    # Get the drowsiness level from the update method's return value
+                    drowsiness_result = self.drowsiness_detector.update(
+                        ear_value=ear,
+                        head_pose=None,
+                        gaze_direction=None
+                    )
+                    drowsiness_level = drowsiness_result['drowsiness_level']
                 
                 alert_status = drowsiness_level > 0.5
                 # Use the instance directly
@@ -1284,6 +1295,165 @@ class DriverDrowsinessMainWindow(QMainWindow):
         """Grid göster/gizle."""
         if hasattr(self, 'head_pose_panel'):
             self.head_pose_panel.set_grid_visible(checked)
+
+    def on_upload_video(self):
+        """Handle the video upload menu action."""
+        # Create a dialog to host the video upload widget
+        upload_dialog = QDialog(self)
+        upload_dialog.setWindowTitle("Video Yükleme")
+        upload_dialog.setMinimumSize(800, 600)
+        
+        # Create layout for the dialog
+        layout = QVBoxLayout(upload_dialog)
+        
+        # Create the video upload widget
+        self.video_upload_widget = VideoUploadWidget(self.ui_config)
+        layout.addWidget(self.video_upload_widget)
+        
+        # Connect signals
+        self.video_upload_widget.video_selected.connect(self._on_video_selected)
+        self.video_upload_widget.analysis_started.connect(self._on_video_analysis_started)
+        self.video_upload_widget.analysis_completed.connect(self._on_video_analysis_completed)
+        
+        # Show the dialog
+        upload_dialog.exec()
+    
+    def _on_video_selected(self, video_path):
+        """Handle video selection."""
+        self.logger.info(f"Video selected: {video_path}")
+        self.update_status(f"Video seçildi: {os.path.basename(video_path)}")
+    
+    def _on_video_analysis_started(self, video_path):
+        """Handle video analysis start."""
+        self.logger.info(f"Starting analysis of video: {video_path}")
+        self.update_status(f"Video analizi başlatıldı: {os.path.basename(video_path)}")
+        
+        # Initialize the video analyzer if not already done
+        if not hasattr(self, 'video_analyzer'):
+            self.video_analyzer = VideoAnalyzer(self.config)
+            
+            # Connect signals
+            self.video_analyzer.progress_updated.connect(self.video_upload_widget.update_progress)
+            self.video_analyzer.frame_processed.connect(self._on_frame_processed)
+            self.video_analyzer.analysis_completed.connect(self._on_analysis_results_ready)
+            self.video_analyzer.error_occurred.connect(self._on_analysis_error)
+        
+        # Start analysis
+        success = self.video_analyzer.analyze_video(video_path)
+        
+        if not success:
+            self.update_status(f"Video analizi başlatılamadı: {os.path.basename(video_path)}")
+    
+    def _on_frame_processed(self, frame_data, processed_frame):
+        """
+        Handle processed frame from video analyzer.
+        
+        Args:
+            frame_data: FrameData object with analysis results
+            processed_frame: Processed frame with visualizations
+        """
+        # Update video panel if available
+        if hasattr(self, 'video_panel'):
+            self.video_panel.update_frame(processed_frame)
+        
+        # Store results for later use
+        if not hasattr(self, 'video_analysis_results'):
+            self.video_analysis_results = {
+                'ear_values': [],
+                'mar_values': [],
+                'perclos_values': [],
+                'drowsiness_alerts': [],
+                'timestamps': []
+            }
+        
+        # Add data to results
+        if frame_data.face_detected:
+            self.video_analysis_results['timestamps'].append(frame_data.timestamp)
+            
+            if frame_data.ear is not None:
+                self.video_analysis_results['ear_values'].append(frame_data.ear)
+            
+            if frame_data.mar is not None:
+                self.video_analysis_results['mar_values'].append(frame_data.mar)
+            
+            if frame_data.perclos is not None:
+                self.video_analysis_results['perclos_values'].append(frame_data.perclos)
+            
+            # Check for drowsiness alert
+            if frame_data.is_drowsy:
+                self.video_analysis_results['drowsiness_alerts'].append({
+                    'timestamp': frame_data.timestamp,
+                    'perclos': frame_data.perclos,
+                    'ear': frame_data.ear,
+                    'mar': frame_data.mar
+                })
+    
+    def _on_analysis_results_ready(self, statistics):
+        """
+        Handle analysis results.
+        
+        Args:
+            statistics: Dictionary with analysis statistics
+        """
+        self.logger.info("Video analysis statistics received")
+        
+        # Store statistics
+        self.video_analysis_statistics = statistics
+        
+        # Generate report
+        if hasattr(self, 'video_analyzer'):
+            report = self.video_analyzer.generate_report(statistics)
+            
+            # Show report in a dialog
+            self._show_analysis_report(report)
+    
+    def _on_analysis_error(self, error_message):
+        """
+        Handle analysis error.
+        
+        Args:
+            error_message: Error message
+        """
+        self.logger.error(f"Video analysis error: {error_message}")
+        self.update_status(f"Video analizi hatası: {error_message}")
+    
+    def _show_analysis_report(self, report):
+        """
+        Show analysis report in a dialog.
+        
+        Args:
+            report: Report text
+        """
+        # Create dialog
+        report_dialog = QDialog(self)
+        report_dialog.setWindowTitle("Video Analiz Raporu")
+        report_dialog.setMinimumSize(600, 400)
+        
+        # Create layout
+        layout = QVBoxLayout(report_dialog)
+        
+        # Create text edit for report
+        report_text = QTextEdit()
+        report_text.setReadOnly(True)
+        report_text.setPlainText(report)
+        layout.addWidget(report_text)
+        
+        # Create button to close dialog
+        close_button = QPushButton("Kapat")
+        close_button.clicked.connect(report_dialog.accept)
+        layout.addWidget(close_button, alignment=Qt.AlignmentFlag.AlignRight)
+        
+        # Show dialog
+        report_dialog.exec()
+    
+    def _on_video_analysis_completed(self):
+        """Handle video analysis completion."""
+        self.logger.info("Video analysis completed")
+        self.update_status("Video analizi tamamlandı")
+        
+        # Stop the analyzer if it's still running
+        if hasattr(self, 'video_analyzer') and self.video_analyzer.is_analyzing:
+            self.video_analyzer.stop_analysis()
 
 
 def main():

@@ -207,3 +207,11 @@ models/*.bin
 models/*.tflite
 models/*.pb
 models/*.h5
+
+# Reports klasörü - Analiz raporları
+reports/
+reports/**/*
+reports/*.txt
+reports/*.csv
+reports/*.json
+reports/*.pdf
