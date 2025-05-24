@@ -176,11 +176,14 @@ python scripts/scientific_evaluation.py \
 ```
 
 ![Classification Performance Metrics](src/images/error_heatmap.png)
+
 ##### Most Frequent Confusion Pairs:
 - Zones 4↔5: 36 errors (2.32%)
 - Zones 1↔2: 21 errors (1.35%)
 - Zones 2↔4: 14 errors (0.90%)
+- 
 ![Classification Performance Metrics](src/images/category_analysis.png)
+
 #### Critical Zone Performance:
 - Critical Zone Accuracy: 85.82%
 - Safety Impact Score: 14.18%
@@ -188,6 +191,7 @@ python scripts/scientific_evaluation.py \
 #### CONCLUSIONS AND RECOMMENDATIONS
 - Excellent classification performance achieved (>90% accuracy)
 - Almost perfect inter-rater agreement demonstrated
+
 ---
 
 ## 🔬 **Scientific References**
