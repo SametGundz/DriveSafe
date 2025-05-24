@@ -34,19 +34,44 @@ class JSONConverterWorker(QThread):
         self.input_file_path = input_file_path
         self.output_dir = output_dir
         
-        # Zone eşleme tablosu - Ground truth ile uyumlu zone_id formatı
-        # NOT: Sol ve sağ bölgelerin ID'leri güncellendi (GazeZoneDetector ile uyumlu olması için)
+        # Zone eşleme tablosu - Dataset Zone ID'lerini Sistem Zone ID'lerine dönüştür
         self.zone_map = {
+            # Dataset Zone ID -> Sistem Zone ID
+            0: 3,    # left_mirror -> Left Side
+            1: 3,    # left -> Left Side
+            2: 0,    # front -> Road Center
+            3: 5,    # center_mirror -> Rear Mirror
+            4: 4,    # front_right -> Right Side
+            5: 4,    # right_mirror -> Right Side
+            6: 4,    # right -> Right Side
+            7: 2,    # infotainment -> Infotainment
+            8: 1,    # steering_wheel -> Driving Instruments
+            9: None  # not_valid -> Geçersiz
+        }
+        
+        # String tabanlı zone eşleme tablosu (eski format desteği için)
+        self.string_zone_map = {
             "gaze_zone/front": 0,              # Road Center
-            "gaze_zone/steering_wheel": 1,     # Driving Instruments  
+            "gaze_zone/steering_wheel": 1,     # Driving Instruments
             "gaze_zone/infotainment": 2,       # Infotainment
-            "gaze_zone/right": 3,              # Right Side (ID değiştirildi: 4 -> 3)
-            "gaze_zone/front_right": 3,        # Right Side (ID değiştirildi: 4 -> 3)
-            "gaze_zone/right_mirror": 3,       # Right Side (ID değiştirildi: 4 -> 3)
-            "gaze_zone/left": 4,               # Left Side (ID değiştirildi: 3 -> 4)
-            "gaze_zone/left_mirror": 4,        # Left Side (ID değiştirildi: 3 -> 4)
+            "gaze_zone/right": 4,              # Right Side
+            "gaze_zone/front_right": 4,        # Right Side
+            "gaze_zone/right_mirror": 4,       # Right Side
+            "gaze_zone/left": 3,               # Left Side
+            "gaze_zone/left_mirror": 3,        # Left Side
             "gaze_zone/center_mirror": 5,      # Rear Mirror
             "gaze_zone/not_valid": None        # Not a valid gaze zone
+        }
+        
+        # Zone açıklamaları
+        self.zone_descriptions = {
+            0: "Road Center",
+            1: "Driving Instruments", 
+            2: "Infotainment",
+            3: "Left Side",
+            4: "Right Side",
+            5: "Rear Mirror",
+            None: "Invalid Zone"
         }
     
     def run(self):
@@ -67,31 +92,48 @@ class JSONConverterWorker(QThread):
             converted_output = defaultdict(list)
             unknown_types = set()
             zone_stats = defaultdict(int)
+            total_frames = 0
+            skipped_frames = 0
             
             for action_id, action in actions.items():
-                action_type = action.get("type", "").lower()
+                action_type = action.get("type", "")
                 intervals = action.get("frame_intervals", [])
                 
-                # Bilinmeyen zone türlerini topla
-                if action_type.startswith("gaze_zone/") and action_type not in self.zone_map:
-                    unknown_types.add(action_type)
+                # Zone ID'yi belirle (hem numeric hem string format desteği)
+                zone_id = None
                 
-                zone_id = self.zone_map.get(action_type, None)
+                if isinstance(action_type, int) or action_type.isdigit():
+                    # Numeric zone ID
+                    dataset_zone_id = int(action_type)
+                    if dataset_zone_id in self.zone_map:
+                        zone_id = self.zone_map[dataset_zone_id]
+                    else:
+                        unknown_types.add(f"numeric_zone_{dataset_zone_id}")
+                elif isinstance(action_type, str):
+                    # String zone ID (eski format)
+                    if action_type.lower() in self.string_zone_map:
+                        zone_id = self.string_zone_map[action_type.lower()]
+                    else:
+                        unknown_types.add(action_type)
                 
                 for interval in intervals:
                     start = interval["frame_start"]
                     end = interval["frame_end"]
                     frame_count = end - start + 1
+                    total_frames += frame_count
                     
-                    # Sadece geçerli zone_id'ler için istatistik tut
+                    # Sadece geçerli zone_id'ler için istatistik tut ve frame ekle
                     if zone_id is not None:
                         zone_stats[zone_id] += frame_count
-                    
-                    for frame_id in range(start, end + 1):
-                        frames_to_zones[str(frame_id)] = zone_id
-                        if zone_id is not None:
+                        
+                        for frame_id in range(start, end + 1):
+                            frames_to_zones[str(frame_id)] = zone_id
                             converted_output[zone_id].append(frame_id)
+                    else:
+                        # Null zone_id'li frameler sayılıyor ama dönüştürmeye dahil edilmiyor
+                        skipped_frames += frame_count
             
+            self.progress_updated.emit(f"Veriler işlendi: {len(frames_to_zones)} frame kaydedilecek, {skipped_frames} null frame atlandı.")
             self.progress_updated.emit("Çıktı dosyaları kaydediliyor...")
             
             # Çıktı dosyalarını kaydet
@@ -110,17 +152,61 @@ class JSONConverterWorker(QThread):
             with open(frames_to_zones_path, "w", encoding="utf-8") as f_out:
                 json.dump(frames_to_zones, f_out, indent=2, ensure_ascii=False)
             
+            # Sıralı zone listesi dosyası
+            sequential_zones_path = os.path.join(self.output_dir, "sequential_zones.json")
+            
+            # Sıralı frame ID'lerini topla
+            all_frames = []
+            for zone_id, frames in converted_output.items():
+                all_frames.extend([(frame, zone_id) for frame in frames])
+            
+            # Frame ID'lerine göre sırala
+            all_frames.sort(key=lambda x: x[0])
+            
+            # Sıralı zone listesi oluştur
+            sequential_zones = [{"frame": frame, "zone": zone} for frame, zone in all_frames]
+            
+            # Sıralı dosyayı kaydet
+            with open(sequential_zones_path, "w", encoding="utf-8") as f_out:
+                json.dump(sequential_zones, f_out, indent=2, ensure_ascii=False)
+            
+            # Eşleme tablosu dosyası (referans için)
+            zone_mapping_path = os.path.join(self.output_dir, "zone_mapping.json")
+            mapping_info = {
+                "dataset_to_system_mapping": {
+                    "0 (left_mirror)": "3 (Left Side)",
+                    "1 (left)": "3 (Left Side)",
+                    "2 (front)": "0 (Road Center)",
+                    "3 (center_mirror)": "5 (Rear Mirror)",
+                    "4 (front_right)": "4 (Right Side)",
+                    "5 (right_mirror)": "4 (Right Side)",
+                    "6 (right)": "4 (Right Side)",
+                    "7 (infotainment)": "2 (Infotainment)",
+                    "8 (steering_wheel)": "1 (Driving Instruments)",
+                    "9 (not_valid)": "None (Invalid)"
+                },
+                "numeric_mapping": self.zone_map,
+                "zone_descriptions": self.zone_descriptions
+            }
+            
+            with open(zone_mapping_path, "w", encoding="utf-8") as f_out:
+                json.dump(mapping_info, f_out, indent=2, ensure_ascii=False)
+            
             # Sonuç verilerini hazırla
             result_data = {
                 "converted_output_path": converted_output_path,
                 "frames_to_zones_path": frames_to_zones_path,
-                "total_frames": len(frames_to_zones),
+                "sequential_zones_path": sequential_zones_path,
+                "zone_mapping_path": zone_mapping_path,
+                "total_frames_processed": total_frames,
+                "total_frames_included": len(frames_to_zones),
+                "total_frames_skipped": skipped_frames,
                 "zone_stats": dict(zone_stats),
                 "unknown_types": list(unknown_types),
                 "zone_map": self.zone_map
             }
             
-            self.progress_updated.emit("Dönüştürme tamamlandı!")
+            self.progress_updated.emit(f"Dönüştürme tamamlandı! Toplam {total_frames} frame işlendi, {len(frames_to_zones)} frame kaydedildi, {skipped_frames} null frame atlandı.")
             self.conversion_finished.emit(result_data)
             
         except Exception as e:
@@ -137,8 +223,8 @@ class JSONConverterUI(QMainWindow):
         
     def init_ui(self):
         """Kullanıcı arayüzünü başlat."""
-        self.setWindowTitle("JSON Gaze Zone Dönüştürücü")
-        self.setMinimumSize(800, 600)
+        self.setWindowTitle("JSON Gaze Zone Dönüştürücü v2.0")
+        self.setMinimumSize(800, 700)
         
         # Ana widget
         central_widget = QWidget()
@@ -153,6 +239,17 @@ class JSONConverterUI(QMainWindow):
         title_label.setFont(title_font)
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title_label)
+        
+        # Zone eşleme bilgisi
+        mapping_info = QLabel(
+            "Dataset Zone ID → Sistem Zone ID Dönüştürme:\n"
+            "0→3 (Left Side), 1→3 (Left Side), 2→0 (Road Center), 3→5 (Rear Mirror)\n"
+            "4→4 (Right Side), 5→4 (Right Side), 6→4 (Right Side), 7→2 (Infotainment)\n"
+            "8→1 (Driving Instruments), 9→None (Invalid)"
+        )
+        mapping_info.setStyleSheet("background-color: #e7f3ff; padding: 10px; border: 1px solid #b3d9ff; border-radius: 5px;")
+        mapping_info.setWordWrap(True)
+        layout.addWidget(mapping_info)
         
         # Dosya seçimi grubu
         file_group = QGroupBox("Dosya Seçimi")
@@ -312,7 +409,7 @@ class JSONConverterUI(QMainWindow):
         
         # İstatistikler
         self.log_text.append(f"\n📊 İstatistikler:")
-        self.log_text.append(f"   • Toplam frame sayısı: {result_data['total_frames']}")
+        self.log_text.append(f"   • Toplam frame sayısı: {result_data['total_frames_processed']}")
         
         # Zone istatistikleri
         self.log_text.append(f"\n🎯 Zone Dağılımı:")
@@ -323,7 +420,7 @@ class JSONConverterUI(QMainWindow):
         
         # Bilinmeyen türler
         if result_data['unknown_types']:
-            self.log_text.append(f"\n⚠️ Tanımsız gaze_zone türleri:")
+            self.log_text.append(f"\n⚠️ Tanımsız zone türleri:")
             for unknown in result_data['unknown_types']:
                 self.log_text.append(f"   • {unknown}")
         
@@ -335,8 +432,14 @@ class JSONConverterUI(QMainWindow):
             self, 
             "Başarılı", 
             f"Dönüştürme tamamlandı!\n\n"
-            f"Toplam {result_data['total_frames']} frame işlendi.\n"
-            f"Çıktı dosyaları: {self.output_dir}"
+            f"Toplam {result_data['total_frames_processed']} frame işlendi.\n"
+            f"{result_data['total_frames_included']} frame kaydedildi, {result_data['total_frames_skipped']} null frame atlandı.\n"
+            f"4 çıktı dosyası oluşturuldu:\n"
+            f"• converted_output.json\n"
+            f"• frames_to_zones.json\n"
+            f"• sequential_zones.json\n"
+            f"• zone_mapping.json\n\n"
+            f"Konum: {self.output_dir}"
         )
     
     def on_error(self, error_message):
@@ -354,7 +457,9 @@ class JSONConverterUI(QMainWindow):
         # Çıktı dosya yolları
         files_info = [
             ("converted_output.json", result_data['converted_output_path']),
-            ("frames_to_zones.json", result_data['frames_to_zones_path'])
+            ("frames_to_zones.json", result_data['frames_to_zones_path']),
+            ("sequential_zones.json", result_data['sequential_zones_path']),
+            ("zone_mapping.json", result_data['zone_mapping_path'])
         ]
         
         for filename, filepath in files_info:
@@ -414,8 +519,8 @@ class JSONConverterUI(QMainWindow):
             0: "Road Center",
             1: "Driving Instruments", 
             2: "Infotainment",
-            3: "Right Side",  # Değiştirildi: Left -> Right
-            4: "Left Side",   # Değiştirildi: Right -> Left
+            3: "Left Side",
+            4: "Right Side",
             5: "Rear Mirror",
             None: "Invalid Zone"
         }
@@ -438,7 +543,7 @@ def main():
     
     # Uygulama ayarları
     app.setApplicationName("JSON Gaze Zone Dönüştürücü")
-    app.setApplicationVersion("1.0")
+    app.setApplicationVersion("2.0")
     
     # Ana pencereyi oluştur ve göster
     window = JSONConverterUI()
@@ -449,4 +554,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main() 
+    main()

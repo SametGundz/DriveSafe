@@ -36,12 +36,12 @@ class GazeZoneDetector:
     # Bölge tanımları - (yaw_min, yaw_max, pitch_min, pitch_max)
     # Açı değerleri derece cinsindendir, GazeDurationMonitor sınıfıyla uyumlu
     ZONES = {
-        0: (-15, 15, -15, 15),     # Road Center - Yol merkezi
-        1: (-15, 15, -40, -15),    # Driving Instruments - Gösterge paneli
-        2: (-15, 15, -70, -40),    # Infotainment - Eğlence sistemi
+        0: (-15, 25, -15, 5),     # Road Center - Yol merkezi
+        1: (-15, 15, -70, -10),    # Driving Instruments - Gösterge paneli 
+        2: (15, 45, -70, -10),    # Infotainment - Eğlence sistemi (Yaw değeri genişletildi: -15/15 -> 15/45)
         3: (-90, -15, -40, 40),    # Sol yan cam ve ayna (Artık negatif yaw değerleri - sol taraf)
-        4: (15, 90, -40, 40),      # Sağ yan cam ve ayna (Artık pozitif yaw değerleri - sağ taraf)
-        5: (-15, 15, 15, 40)       # Rear Mirror - Dikiz aynası
+        4: (40, 90, -20, 40),      # Sağ yan cam ve ayna (Artık pozitif yaw değerleri - sağ taraf)
+        5: (-15, 40, 5, 40)       # Rear Mirror - Dikiz aynası (Sağa doğru genişletildi)
     }
     
     # Bölge adları - GazeDurationMonitor sınıfıyla uyumlu
@@ -138,18 +138,18 @@ class GazeZoneDetector:
         if pitch < -70 or pitch > 40 or yaw < -90 or yaw > 90:
             logger.warning(f"Angles out of expected range - Pitch: {pitch:.2f}°, Yaw: {yaw:.2f}°")
         
-        # Road Center (zone 0): -15 <= yaw <= 15, -15 <= pitch <= 15
-        if -15 <= yaw <= 15 and -15 <= pitch <= 15:
+        # Road Center (zone 0): -15 <= yaw <= 25, -15 <= pitch <= 5
+        if -15 <= yaw <= 25 and -15 <= pitch <= 5:
             logger.debug("Matching Zone 0: Road Center")
             return 0
             
-        # Driving Instruments (zone 1): -15 <= yaw <= 15, -40 <= pitch < -15
-        if -15 <= yaw <= 15 and -40 <= pitch < -15:
+        # Driving Instruments (zone 1): -15 <= yaw <= 15, -70 <= pitch < -10
+        if -15 <= yaw <= 15 and -70 <= pitch < -10:
             logger.debug("Matching Zone 1: Driving Instruments")
             return 1
         
-        # Infotainment (zone 2): -15 <= yaw <= 15, -70 <= pitch < -40
-        if -15 <= yaw <= 15 and -70 <= pitch < -40:
+        # Infotainment (zone 2): 15 <= yaw <= 45, -70 <= pitch < -10
+        if 15 <= yaw <= 45 and -70 <= pitch < -10:
             logger.debug("Matching Zone 2: Infotainment")
             return 2
             
@@ -158,13 +158,13 @@ class GazeZoneDetector:
             logger.debug("Matching Zone 3: Left Side")
             return 3
             
-        # Right Side (zone 4): 15 < yaw <= 90, -40 <= pitch <= 40
-        if 15 < yaw <= 90 and -40 <= pitch <= 40:
+        # Right Side (zone 4): 40 <= yaw <= 90, -20 <= pitch <= 40
+        if 40 <= yaw <= 90 and -20 <= pitch <= 40:
             logger.debug("Matching Zone 4: Right Side")
             return 4
             
-        # Rear Mirror (zone 5): -15 <= yaw <= 15, 15 < pitch <= 40
-        if -15 <= yaw <= 15 and 15 < pitch <= 40:
+        # Rear Mirror (zone 5): -15 <= yaw <= 40, 5 < pitch <= 40
+        if -15 <= yaw <= 40 and 5 < pitch <= 40:
             logger.debug("Matching Zone 5: Rear Mirror")
             return 5
         
