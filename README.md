@@ -95,17 +95,17 @@ python scripts/calibrate_gaze_zones.py
 
 ![Classification Performance Metrics](src/images/performance_radar.png)
 
-#### CLASSIFICATION PERFORMANCE METRICS
-Overall Accuracy: 93.23%
-Balanced Accuracy: 83.70%
-Macro-averaged Precision: 91.96%
-Macro-averaged Recall: 83.70%
-Macro-averaged F1-Score: 85.84%
+#### Classification Performance Metrics
+- Overall Accuracy: 93.23%
+- Balanced Accuracy: 83.70%
+- Macro-averaged Precision: 91.96%
+- Macro-averaged Recall: 83.70%
+- Macro-averaged F1-Score: 85.84%
 
-#### STATISTICAL RELIABILITY MEASURES
-Cohen's Kappa: 0.9110 (Almost Perfect)
-Matthews Correlation Coefficient: 0.8549
-Krippendorff's Alpha: 0.9110
+#### Statistical Reliability Measures
+- Cohen's Kappa: 0.9110 (Almost Perfect)
+- Matthews Correlation Coefficient: 0.8549
+- Krippendorff's Alpha: 0.9110
 
 ---
 
@@ -181,7 +181,7 @@ python scripts/scientific_evaluation.py \
 - Zones 4↔5: 36 errors (2.32%)
 - Zones 1↔2: 21 errors (1.35%)
 - Zones 2↔4: 14 errors (0.90%)
-- 
+
 ![Classification Performance Metrics](src/images/category_analysis.png)
 
 #### Critical Zone Performance:
