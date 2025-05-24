@@ -436,8 +436,14 @@ class DrowsinessDetector:
             
         # Define font settings
         font = cv2.FONT_HERSHEY_SIMPLEX
-        font_scale = 0.7
-        thickness = 2
+        font_scale = 0.6  # Slightly smaller text
+        thickness = 1  # Thinner lines for better readability
+        padding = 5  # Padding for background rectangle
+        
+        # Starting position for metrics in top-left corner
+        start_x = 10
+        start_y = 30
+        line_height = 25  # Height between lines
         
         # Add EAR value
         if avg_ear is not None:
@@ -445,16 +451,51 @@ class DrowsinessDetector:
             color = (0, 255, 0)  # Green (normal)
             if avg_ear < self.ear_threshold:
                 color = (0, 0, 255)  # Red (eyes closed)
-            cv2.putText(vis_frame, ear_text, (10, 30), font, font_scale, color, thickness)
+            
+            # Get text size for background rectangle
+            (text_width, text_height), baseline = cv2.getTextSize(ear_text, font, font_scale, thickness)
+            
+            # Draw semi-transparent background
+            overlay = vis_frame.copy()
+            cv2.rectangle(
+                overlay,
+                (start_x - padding, start_y - text_height - padding),
+                (start_x + text_width + padding, start_y + padding),
+                (0, 0, 0),  # Black background
+                -1
+            )
+            # Apply transparency
+            cv2.addWeighted(overlay, 0.6, vis_frame, 0.4, 0, vis_frame)
+            
+            # Draw text
+            cv2.putText(vis_frame, ear_text, (start_x, start_y), font, font_scale, color, thickness)
             
         # Add PERCLOS value
+        start_y += line_height
         perclos_text = f"PERCLOS: {self.state.perclos:.2f}%"
         perclos_color = (0, 255, 0)  # Green (normal)
         if self.state.perclos > self.perclos_critical_threshold:
             perclos_color = (0, 0, 255)  # Red (critical)
         elif self.state.perclos > self.perclos_warning_threshold:
             perclos_color = (0, 165, 255)  # Orange (warning)
-        cv2.putText(vis_frame, perclos_text, (10, 60), font, font_scale, perclos_color, thickness)
+        
+        # Get text size for background rectangle
+        (text_width, text_height), baseline = cv2.getTextSize(perclos_text, font, font_scale, thickness)
+        
+        # Draw semi-transparent background
+        overlay = vis_frame.copy()
+        cv2.rectangle(
+            overlay,
+            (start_x - padding, start_y - text_height - padding),
+            (start_x + text_width + padding, start_y + padding),
+            (0, 0, 0),  # Black background
+            -1
+        )
+        # Apply transparency
+        cv2.addWeighted(overlay, 0.6, vis_frame, 0.4, 0, vis_frame)
+        
+        # Draw text
+        cv2.putText(vis_frame, perclos_text, (start_x, start_y), font, font_scale, perclos_color, thickness)
         
         # Calculate drowsiness level
         drowsiness_level = self._calculate_drowsiness_level()
@@ -472,15 +513,52 @@ class DrowsinessDetector:
         else:
             drowsiness_state = "Danger"
             drowsiness_color = (0, 0, 255)  # Red
-            
+        
+        # Add drowsiness level
+        start_y += line_height
         drowsiness_text = f"Drowsiness: {drowsiness_level:.2f} - {drowsiness_state}"
-        cv2.putText(vis_frame, drowsiness_text, (10, 90), font, font_scale, drowsiness_color, thickness)
+        
+        # Get text size for background rectangle
+        (text_width, text_height), baseline = cv2.getTextSize(drowsiness_text, font, font_scale, thickness)
+        
+        # Draw semi-transparent background
+        overlay = vis_frame.copy()
+        cv2.rectangle(
+            overlay,
+            (start_x - padding, start_y - text_height - padding),
+            (start_x + text_width + padding, start_y + padding),
+            (0, 0, 0),  # Black background
+            -1
+        )
+        # Apply transparency
+        cv2.addWeighted(overlay, 0.6, vis_frame, 0.4, 0, vis_frame)
+        
+        # Draw text
+        cv2.putText(vis_frame, drowsiness_text, (start_x, start_y), font, font_scale, drowsiness_color, thickness)
         
         # Add eyes closed duration if eyes are closed
         if self.state.is_eyes_closed and self.state.eyes_closed_start_time is not None:
             closed_duration = time.time() - self.state.eyes_closed_start_time
             if closed_duration > 1.0:  # Only show if closed for more than 1 second
+                start_y += line_height
                 closed_text = f"Eyes Closed: {closed_duration:.1f}s"
-                cv2.putText(vis_frame, closed_text, (10, 120), font, font_scale, (0, 0, 255), thickness)
+                
+                # Get text size for background rectangle
+                (text_width, text_height), baseline = cv2.getTextSize(closed_text, font, font_scale, thickness)
+                
+                # Draw semi-transparent background
+                overlay = vis_frame.copy()
+                cv2.rectangle(
+                    overlay,
+                    (start_x - padding, start_y - text_height - padding),
+                    (start_x + text_width + padding, start_y + padding),
+                    (0, 0, 0),  # Black background
+                    -1
+                )
+                # Apply transparency
+                cv2.addWeighted(overlay, 0.6, vis_frame, 0.4, 0, vis_frame)
+                
+                # Draw text
+                cv2.putText(vis_frame, closed_text, (start_x, start_y), font, font_scale, (0, 0, 255), thickness)
                 
         return vis_frame 
