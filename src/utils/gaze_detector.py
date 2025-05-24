@@ -865,7 +865,10 @@ class GazeDetector:
     
     def visualize_gaze_zone(self, frame: np.ndarray, landmarks: List[List[float]]) -> Tuple[np.ndarray, Optional[int]]:
         """
-        Bakış bölgesini tespit eder ve görselleştirir.
+        Bakış bölgesini tespit eder.
+        
+        NOT: Bu metot artık görsel çıktı oluşturmamaktadır. Ana pencere bu işlevi üstlenmiştir.
+        Sadece bölge ID'sini döndürmek için kullanılmaktadır.
         
         Args:
             frame: Giriş karesi
@@ -873,7 +876,7 @@ class GazeDetector:
             
         Returns:
             Tuple[np.ndarray, Optional[int]]: 
-                - Görselleştirilmiş kare
+                - Değiştirilmemiş kare
                 - Tespit edilen bölge ID'si
         """
         if not landmarks:
@@ -885,23 +888,8 @@ class GazeDetector:
         # Bölge tespiti yap
         zone_id = self.get_gaze_target_zone(gaze_vector)
         
-        # Bölge adını al
-        zone_detector = get_gaze_zone_detector()
-        zone_name = zone_detector.get_zone_name(zone_id)
-        
-        # Bakılan bölgeyi ekranda göster
-        if zone_id is not None:
-            # Bakış bölgesi bilgisini ekrana yazdır
-            cv2.putText(
-                frame, 
-                f"Gaze Zone: {zone_name} ({zone_id})", 
-                (10, 60), 
-                cv2.FONT_HERSHEY_SIMPLEX, 
-                0.7, 
-                (0, 255, 0), 
-                2
-            )
-        
+        # Artık görsel değişiklik yapmıyoruz
+        # Sadece zone_id değerini döndürüyoruz
         return frame, zone_id
     
     def reset(self):

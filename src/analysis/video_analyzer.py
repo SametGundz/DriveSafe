@@ -16,6 +16,7 @@ import cv2
 import numpy as np
 import logging
 import time
+import json
 from pathlib import Path
 from typing import List, Tuple, Dict, Any, Optional, Union, Callable
 from dataclasses import dataclass
@@ -40,6 +41,7 @@ class FrameData:
     face_detected: bool = False
     landmarks: Optional[List[List[float]]] = None
     gaze_data: Optional[GazeData] = None
+    gaze_zone_id: Optional[int] = None  # Bakılan bölgenin zone ID'si
     drowsiness_level: float = 0.0
     is_drowsy: bool = False
     is_distracted: bool = False
@@ -189,6 +191,10 @@ class AnalysisWorker(QThread):
                     gaze_data = self.gaze_processor.process_frame(frame, landmarks, timestamp)
                     frame_data.gaze_data = gaze_data
                     frame_data.is_distracted = gaze_data.is_distracted if gaze_data else False
+                    
+                    # Gaze Zone ID'sini kaydet
+                    if gaze_data and gaze_data.zone_id is not None:
+                        frame_data.gaze_zone_id = gaze_data.zone_id
                     
                     # Update drowsiness detection
                     drowsiness_result = self.drowsiness_detector.update(
@@ -466,8 +472,55 @@ class VideoAnalyzer(QObject):
             statistics: Analysis statistics
         """
         self.is_analyzing = False
+        
+        # Frame-Zone eşlemesi dosyasını oluştur
+        if hasattr(self, 'worker') and self.worker and hasattr(self.worker, 'frame_data'):
+            self._save_frame_zone_data()
+        
         self.analysis_completed.emit(statistics)
         logger.info("Analysis completed")
+    
+    def _save_frame_zone_data(self) -> Optional[str]:
+        """
+        Her frame için gaze zone bilgilerini JSON olarak kaydet.
+        
+        Returns:
+            str: Kaydedilen dosyanın yolu veya None
+        """
+        if not self.video_path or not hasattr(self, 'worker') or not self.worker:
+            logger.warning("Cannot save frame zone data: No valid worker or video path")
+            return None
+        
+        try:
+            # Frame data'yı al
+            frame_data_list = self.worker.frame_data
+            
+            if not frame_data_list:
+                logger.warning("No frame data available to save")
+                return None
+            
+            # Frame → Zone dictionary oluştur
+            frame_to_zone = {}
+            for data in frame_data_list:
+                frame_to_zone[str(data.frame_number)] = data.gaze_zone_id
+            
+            # Dosya yolunu oluştur
+            video_name = os.path.splitext(os.path.basename(self.video_path))[0]
+            output_dir = os.path.join(os.path.dirname(self.video_path), "analysis_results")
+            os.makedirs(output_dir, exist_ok=True)
+            
+            prediction_path = os.path.join(output_dir, f"{video_name}_gaze_zones.json")
+            
+            # JSON olarak kaydet
+            with open(prediction_path, 'w', encoding='utf-8') as f:
+                json.dump(frame_to_zone, f, indent=2)
+            
+            logger.info(f"Frame-zone mapping saved to {prediction_path}")
+            return prediction_path
+            
+        except Exception as e:
+            logger.error(f"Error saving frame zone data: {str(e)}")
+            return None
     
     def generate_report(self, statistics: Dict[str, Any], output_path: Optional[str] = None) -> str:
         """

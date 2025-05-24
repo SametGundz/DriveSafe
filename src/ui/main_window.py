@@ -797,51 +797,6 @@ class DriverDrowsinessMainWindow(QMainWindow):
                     h, w = norm_face_display.shape[:2]
                     processed_frame[10:10+h, processed_frame.shape[1]-w-10:processed_frame.shape[1]-10] = norm_face_display
                 
-                # Bakış açılarını ekranda göster (FPS stilinde)
-                # Sadece gaze vector geçerli ise ve gözler açıksa göster
-                if (hasattr(self.mediapipe_helper.gaze_detector, '_last_gaze_vector') and 
-                        self.mediapipe_helper.gaze_detector._last_gaze_vector is not None and 
-                        (ear is None or ear >= ear_threshold)):
-                    pitch, yaw = np.rad2deg(self.mediapipe_helper.gaze_detector._last_gaze_vector)
-                    
-                    # Bakış yönü metnini oluştur - İngilizce olarak
-                    pitch_yaw_text = f"Pitch: {pitch:.1f}° Yaw: {yaw:.1f}°"
-                    font = cv2.FONT_HERSHEY_SIMPLEX
-                    font_scale = 0.4  # Daha küçük
-                    thickness = 1
-                    font_color = (0, 255, 255)
-                    
-                    # Metin boyutunu al
-                    (text_width, text_height), baseline = cv2.getTextSize(pitch_yaw_text, font, font_scale, thickness)
-                    
-                    # Sağ alt köşe pozisyonu
-                    text_x = processed_frame.shape[1] - text_width - 10
-                    text_y = processed_frame.shape[0] - 10
-                    
-                    # Yarı saydam arka plan kutusu çiz
-                    padding = 5
-                    overlay = processed_frame.copy()
-                    cv2.rectangle(
-                        overlay,
-                        (text_x - padding, text_y - text_height - padding),
-                        (text_x + text_width + padding, text_y + padding),
-                        (0, 0, 0),
-                        -1
-                    )
-                    # Şeffaflık uygula
-                    cv2.addWeighted(overlay, 0.6, processed_frame, 0.4, 0, processed_frame)
-                    
-                    # Pitch ve Yaw yazısını ekle
-                    cv2.putText(
-                        processed_frame,
-                        pitch_yaw_text,
-                        (text_x, text_y),
-                        font,
-                        font_scale,
-                        font_color,
-                        thickness
-                    )
-                
                 # GAZE ZONE TESPİTİ VE KAYIT - Her durumda yap (show_gaze veya show_gaze_zone durumundan bağımsız)
                 # Sadece gaze vector geçerli ise ve gözler açıksa işlem yap
                 ear_threshold = self.config.get('detection', {}).get('ear_threshold', 0.21)
@@ -892,43 +847,71 @@ class DriverDrowsinessMainWindow(QMainWindow):
                         except Exception as e:
                             self.logger.error(f"Error updating gaze duration monitor: {str(e)}")
                     
+                    # Bakış açılarını ekranda göster (FPS stilinde)
+                    # Sadece gaze vector geçerli ise ve gözler açıksa göster
+                    pitch, yaw = np.rad2deg(gaze_vector)
+                    
+                    # Bakış yönü metnini oluştur - İngilizce olarak
+                    pitch_yaw_text = f"Pitch: {pitch:.1f}° Yaw: {yaw:.1f}°"
+                    font = cv2.FONT_HERSHEY_SIMPLEX
+                    font_scale = 0.4  # Daha küçük
+                    thickness = 1
+                    font_color = (0, 255, 255)
+                    
+                    # Metin boyutunu al
+                    (text_width, text_height), baseline = cv2.getTextSize(pitch_yaw_text, font, font_scale, thickness)
+                    
+                    # Sağ üst köşe pozisyonu
+                    padding = 5
+                    text_x = processed_frame.shape[1] - text_width - padding
+                    text_y = 30  # Üstten mesafe
+                    
+                    # Yarı saydam arka plan kutusu çiz
+                    overlay = processed_frame.copy()
+                    cv2.rectangle(
+                        overlay,
+                        (text_x - padding, text_y - text_height - padding),
+                        (text_x + text_width + padding * 2, text_y + padding),
+                        (0, 0, 0),  # Siyah arkaplan
+                        -1
+                    )
+                    # Şeffaflık uygula
+                    cv2.addWeighted(overlay, 0.6, processed_frame, 0.4, 0, processed_frame)
+                    
+                    # Pitch ve Yaw yazısını ekle
+                    cv2.putText(
+                        processed_frame,
+                        pitch_yaw_text,
+                        (text_x, text_y),
+                        font,
+                        font_scale,
+                        font_color,
+                        thickness
+                    )
+                    
                     # Bakış bölgesi görselleştirme - sadece show_gaze_zone etkinse göster
-                    if self.show_gaze_zone:
+                    if self.show_gaze_zone and zone_id is not None:
                         # Bölge adını al
                         zone_detector = get_gaze_zone_detector()
                         zone_name = zone_detector.get_zone_name(zone_id)
                         
-                        # Pitch ve yaw değerlerini alalım
-                        pitch, yaw = np.rad2deg(gaze_vector)
-                        
-                        # Bakış bölgesi metnini oluştur - İngilizce olarak
-                        if zone_id is not None:
-                            gaze_zone_text = f"Gaze Zone: {zone_name} ({zone_id})"
-                        else:
-                            # Bölge bilinmiyorsa açı değerlerini göster
-                            gaze_zone_text = f"Undefined zone: P={pitch:.1f}°, Y={yaw:.1f}°"
-                        
-                        # Metin ayarları
-                        font = cv2.FONT_HERSHEY_SIMPLEX
-                        font_scale = 0.4  # Daha küçük, pitch/yaw ile aynı
-                        thickness = 1
-                        font_color = (0, 255, 255)
+                        # Bakış bölgesi metnini oluştur
+                        gaze_zone_text = f"Gaze Zone: {zone_name} ({zone_id})"
                         
                         # Metin boyutunu al
                         (text_width, text_height), baseline = cv2.getTextSize(gaze_zone_text, font, font_scale, thickness)
                         
-                        # Sol alt köşe pozisyonu
-                        text_x = 10
-                        text_y = processed_frame.shape[0] - 10
+                        # Sağ üst köşe pozisyonu - pitch/yaw'dan sonra
+                        text_x = processed_frame.shape[1] - text_width - padding
+                        text_y = 60  # Pitch/yaw metninin altında
                         
                         # Yarı saydam arka plan kutusu çiz
-                        padding = 5
                         overlay = processed_frame.copy()
                         cv2.rectangle(
                             overlay,
                             (text_x - padding, text_y - text_height - padding),
-                            (text_x + text_width + padding, text_y + padding),
-                            (0, 0, 0),
+                            (text_x + text_width + padding * 2, text_y + padding),
+                            (0, 0, 0),  # Siyah arkaplan
                             -1
                         )
                         # Şeffaflık uygula
@@ -998,7 +981,7 @@ class DriverDrowsinessMainWindow(QMainWindow):
                 processed_frame, 
                 ear_left=left_ear, 
                 ear_right=right_ear,
-                show_metrics=False
+                show_metrics=True
             )
             
             # Dalgınlık uyarısını göster (GazeDurationMonitor'dan)
@@ -1017,18 +1000,20 @@ class DriverDrowsinessMainWindow(QMainWindow):
                 font_scale = 0.6  # Daha küçük yazı boyutu
                 thickness = 1  # Daha ince çizgi
                 
-                # Metni yerleştirme
+                # Metin boyutunu al
                 text_size = cv2.getTextSize(warning_text, font, font_scale, thickness)[0]
-                text_x = (processed_frame.shape[1] - text_size[0]) // 2  # Yatayda ortala
+                
+                # Sağ üst köşeye yerleştir (yatayda sağ tarafta, dikeyde üstte)
+                padding = 5  # Kenarlardan uzaklık
+                text_x = processed_frame.shape[1] - text_size[0] - padding
                 text_y = 30  # Üstten mesafe
                 
                 # Arkaplan dikdörtgeni - Yarı şeffaf arka plan
-                padding = 5  # Daha az padding
                 overlay = processed_frame.copy()
                 cv2.rectangle(
                     overlay,
                     (text_x - padding, text_y - text_size[1] - padding),
-                    (text_x + text_size[0] + padding, text_y + padding),
+                    (text_x + text_size[0] + padding * 2, text_y + padding),
                     (0, 0, 0),  # Siyah arkaplan
                     -1
                 )
@@ -1058,14 +1043,16 @@ class DriverDrowsinessMainWindow(QMainWindow):
                         # Doğrudan İngilizce gelen metni kullan
                         reason_text = f"- {reason}"
                         text_size_reason = cv2.getTextSize(reason_text, font, font_scale_reason, thickness_reason)[0]
-                        reason_x = (processed_frame.shape[1] - text_size_reason[0]) // 2  # Yatayda ortala
+                        
+                        # Nedenleri de sağ tarafta hizala
+                        reason_x = processed_frame.shape[1] - text_size_reason[0] - padding
                         
                         # Arkaplan dikdörtgeni - Yarı şeffaf
                         overlay = processed_frame.copy()
                         cv2.rectangle(
                             overlay,
                             (reason_x - padding, y_pos - text_size_reason[1] - padding),
-                            (reason_x + text_size_reason[0] + padding, y_pos + padding),
+                            (reason_x + text_size_reason[0] + padding * 2, y_pos + padding),
                             (0, 0, 0),  # Siyah arkaplan
                             -1
                         )

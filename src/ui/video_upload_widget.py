@@ -11,7 +11,8 @@ import os
 import logging
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
-    QFileDialog, QProgressBar, QSizePolicy, QFrame
+    QFileDialog, QProgressBar, QSizePolicy, QFrame,
+    QMessageBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtGui import QFont, QPixmap, QImage
@@ -48,6 +49,7 @@ class VideoUploadWidget(QWidget):
         self.config = config
         self.video_path = None
         self.preview_frame = None
+        self.video_analyzer = None
         
         # Set up the UI
         self._init_ui()
@@ -121,6 +123,20 @@ class VideoUploadWidget(QWidget):
         preview_section_layout.addWidget(self.preview_frame_label, alignment=Qt.AlignmentFlag.AlignCenter)
         
         main_layout.addLayout(preview_section_layout)
+        
+        # Result info section
+        self.result_label = QLabel("")
+        self.result_label.setFont(QFont(self.config.get('fonts', {}).get('family', 'Arial'), 10))
+        self.result_label.setStyleSheet("""
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+            border-radius: 4px;
+            padding: 8px;
+            margin-top: 10px;
+        """)
+        self.result_label.setVisible(False)
+        main_layout.addWidget(self.result_label)
         
         # Progress section
         progress_section_layout = QVBoxLayout()
@@ -240,6 +256,9 @@ class VideoUploadWidget(QWidget):
                 self.file_path_label.setText(os.path.basename(self.video_path))
                 self.start_button.setEnabled(True)
                 
+                # Reset result label
+                self.result_label.setVisible(False)
+                
                 # Emit signal
                 self.video_selected.emit(self.video_path)
                 
@@ -303,13 +322,45 @@ class VideoUploadWidget(QWidget):
         self.start_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
         self.progress_bar.setValue(0)
+        self.result_label.setVisible(False)
+        
+        # Initialize video analyzer if not already done
+        if not self.video_analyzer:
+            self.video_analyzer = VideoAnalyzer(self.config)
+            
+            # Connect signals
+            self.video_analyzer.progress_updated.connect(self.update_progress)
+            self.video_analyzer.analysis_completed.connect(self._on_analysis_completed)
+            self.video_analyzer.error_occurred.connect(self._on_analysis_error)
         
         # Emit signal to start analysis
         self.analysis_started.emit(self.video_path)
+        
+        # Start analysis
+        success = self.video_analyzer.analyze_video(self.video_path)
+        
+        if not success:
+            # Reset UI state
+            self.browse_button.setEnabled(True)
+            self.start_button.setEnabled(True)
+            self.cancel_button.setEnabled(False)
+            self.progress_bar.setValue(0)
+            
+            # Show error message
+            QMessageBox.critical(
+                self,
+                "Analiz Hatası",
+                "Video analizi başlatılamadı. Lütfen videoyu kontrol edin ve tekrar deneyin."
+            )
+        
         logger.info(f"Analysis started for video: {self.video_path}")
     
     def _on_cancel_clicked(self):
         """Handle cancel button click."""
+        # Stop analysis
+        if self.video_analyzer and self.video_analyzer.is_analyzing:
+            self.video_analyzer.stop_analysis()
+        
         # Reset UI state
         self.browse_button.setEnabled(True)
         self.start_button.setEnabled(True)
@@ -335,6 +386,73 @@ class VideoUploadWidget(QWidget):
             self.cancel_button.setEnabled(False)
             self.analysis_completed.emit()
             logger.info("Analysis completed")
+    
+    def _on_analysis_completed(self, statistics):
+        """
+        Handle analysis completion.
+        
+        Args:
+            statistics: Analysis statistics
+        """
+        # Check if the video analyzer has saved frame zone data
+        if hasattr(self.video_analyzer, '_save_frame_zone_data'):
+            # _save_frame_zone_data metodunu çağır ve dosya yolunu al
+            output_path = self.video_analyzer._save_frame_zone_data()
+            
+            if output_path and os.path.exists(output_path):
+                # Sonuç bilgisi göster
+                self.result_label.setText(
+                    f"<b>Analiz tamamlandı!</b> Gaze zone verisi şu konuma kaydedildi: "
+                    f"<a href=\"file://{output_path}\">{os.path.basename(output_path)}</a>"
+                )
+                self.result_label.setOpenExternalLinks(True)
+                self.result_label.setVisible(True)
+                
+                # Bilgi mesajı göster
+                QMessageBox.information(
+                    self,
+                    "Analiz Tamamlandı",
+                    f"Video analizi başarıyla tamamlandı!\n\n"
+                    f"Her frame için gaze zone bilgisi JSON formatında kaydedildi:\n{output_path}"
+                )
+            else:
+                # Hata mesajı göster
+                self.result_label.setText(
+                    "<b>Analiz tamamlandı!</b> Ancak gaze zone verileri kaydedilemedi."
+                )
+                self.result_label.setStyleSheet("""
+                    background-color: #fff3cd;
+                    color: #856404;
+                    border: 1px solid #ffeeba;
+                    border-radius: 4px;
+                    padding: 8px;
+                    margin-top: 10px;
+                """)
+                self.result_label.setVisible(True)
+        
+        logger.info("Analysis results processed")
+    
+    def _on_analysis_error(self, error_message):
+        """
+        Handle analysis error.
+        
+        Args:
+            error_message: Error message
+        """
+        # Reset UI state
+        self.browse_button.setEnabled(True)
+        self.start_button.setEnabled(True)
+        self.cancel_button.setEnabled(False)
+        self.progress_bar.setValue(0)
+        
+        # Show error message
+        QMessageBox.critical(
+            self,
+            "Analiz Hatası",
+            f"Video analizi sırasında bir hata oluştu:\n\n{error_message}"
+        )
+        
+        logger.error(f"Analysis error: {error_message}")
     
     def get_video_path(self):
         """

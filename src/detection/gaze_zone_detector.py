@@ -39,8 +39,8 @@ class GazeZoneDetector:
         0: (-15, 15, -15, 15),     # Road Center - Yol merkezi
         1: (-15, 15, -40, -15),    # Driving Instruments - Gösterge paneli
         2: (-15, 15, -70, -40),    # Infotainment - Eğlence sistemi
-        3: (15, 90, -40, 40),      # Left Side - Sol yan cam ve ayna
-        4: (-90, -15, -40, 40),    # Right Side - Sağ yan cam ve ayna
+        3: (-90, -15, -40, 40),    # Sol yan cam ve ayna (Artık negatif yaw değerleri - sol taraf)
+        4: (15, 90, -40, 40),      # Sağ yan cam ve ayna (Artık pozitif yaw değerleri - sağ taraf)
         5: (-15, 15, 15, 40)       # Rear Mirror - Dikiz aynası
     }
     
@@ -153,13 +153,13 @@ class GazeZoneDetector:
             logger.debug("Matching Zone 2: Infotainment")
             return 2
             
-        # Left Side (zone 3): 15 < yaw <= 90, -40 <= pitch <= 40
-        if 15 < yaw <= 90 and -40 <= pitch <= 40:
+        # Left Side (zone 3): -90 <= yaw < -15, -40 <= pitch <= 40
+        if -90 <= yaw < -15 and -40 <= pitch <= 40:
             logger.debug("Matching Zone 3: Left Side")
             return 3
             
-        # Right Side (zone 4): -90 <= yaw < -15, -40 <= pitch <= 40
-        if -90 <= yaw < -15 and -40 <= pitch <= 40:
+        # Right Side (zone 4): 15 < yaw <= 90, -40 <= pitch <= 40
+        if 15 < yaw <= 90 and -40 <= pitch <= 40:
             logger.debug("Matching Zone 4: Right Side")
             return 4
             

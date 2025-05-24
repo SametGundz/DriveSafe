@@ -169,37 +169,103 @@ class GazeProcessor:
             )
             
             # Add gaze information text
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 0.6
+            thickness = 1
+            padding = 5
+            
+            # Pitch/Yaw metni
+            pitch_yaw_text = f"Pitch: {gaze_data.pitch:.1f}° Yaw: {gaze_data.yaw:.1f}°"
+            (text_width, text_height), baseline = cv2.getTextSize(pitch_yaw_text, font, font_scale, thickness)
+            
+            # Sağ üst köşe pozisyonu
+            text_x = processed_frame.shape[1] - text_width - padding
+            text_y = 30  # Üstten mesafe
+            
+            # Yarı saydam arka plan kutusu çiz
+            overlay = processed_frame.copy()
+            cv2.rectangle(
+                overlay,
+                (text_x - padding, text_y - text_height - padding),
+                (text_x + text_width + padding * 2, text_y + padding),
+                (0, 0, 0),  # Siyah arkaplan
+                -1
+            )
+            # Şeffaflık uygula
+            cv2.addWeighted(overlay, 0.6, processed_frame, 0.4, 0, processed_frame)
+            
+            # Pitch ve Yaw yazısını ekle
             cv2.putText(
                 processed_frame,
-                f"Pitch: {gaze_data.pitch:.1f}° Yaw: {gaze_data.yaw:.1f}°",
-                (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                (0, 255, 255),
-                1
+                pitch_yaw_text,
+                (text_x, text_y),
+                font,
+                font_scale,
+                (0, 255, 255),  # Sarı
+                thickness
             )
             
             # Add zone information
             if gaze_data.zone_id is not None:
+                zone_text = f"Zone: {gaze_data.zone_name} ({gaze_data.zone_id})"
+                (text_width, text_height), baseline = cv2.getTextSize(zone_text, font, font_scale, thickness)
+                
+                # Sağ üst köşe pozisyonu - pitch/yaw metninin altında
+                text_x = processed_frame.shape[1] - text_width - padding
+                text_y = 60  # Pitch/yaw metninin altında
+                
+                # Yarı saydam arka plan kutusu çiz
+                overlay = processed_frame.copy()
+                cv2.rectangle(
+                    overlay,
+                    (text_x - padding, text_y - text_height - padding),
+                    (text_x + text_width + padding * 2, text_y + padding),
+                    (0, 0, 0),  # Siyah arkaplan
+                    -1
+                )
+                # Şeffaflık uygula
+                cv2.addWeighted(overlay, 0.6, processed_frame, 0.4, 0, processed_frame)
+                
+                # Zone bilgisini ekle
                 cv2.putText(
                     processed_frame,
-                    f"Zone: {gaze_data.zone_name} ({gaze_data.zone_id})",
-                    (10, 60),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    (0, 255, 255),
-                    1
+                    zone_text,
+                    (text_x, text_y),
+                    font,
+                    font_scale,
+                    (0, 255, 255),  # Sarı
+                    thickness
                 )
             
             # Add distraction warning if distracted
             if gaze_data.is_distracted:
+                warning_text = f"DISTRACTED: {gaze_data.distraction_reason}"
+                (text_width, text_height), baseline = cv2.getTextSize(warning_text, font, 0.7, 2)
+                
+                # Sağ üst köşe pozisyonu - zone metninin altında
+                text_x = processed_frame.shape[1] - text_width - padding
+                text_y = 90  # Zone metninin altında
+                
+                # Yarı saydam arka plan kutusu çiz
+                overlay = processed_frame.copy()
+                cv2.rectangle(
+                    overlay,
+                    (text_x - padding, text_y - text_height - padding),
+                    (text_x + text_width + padding * 2, text_y + padding),
+                    (0, 0, 0),  # Siyah arkaplan
+                    -1
+                )
+                # Şeffaflık uygula
+                cv2.addWeighted(overlay, 0.6, processed_frame, 0.4, 0, processed_frame)
+                
+                # Uyarı metni
                 cv2.putText(
                     processed_frame,
-                    f"DISTRACTED: {gaze_data.distraction_reason}",
-                    (10, 90),
-                    cv2.FONT_HERSHEY_SIMPLEX,
+                    warning_text,
+                    (text_x, text_y),
+                    font,
                     0.7,
-                    (0, 0, 255),
+                    (0, 0, 255),  # Kırmızı
                     2
                 )
             
