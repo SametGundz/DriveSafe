@@ -94,7 +94,7 @@ python tests/test_gaze_zone_detector.py --camera 0 --show_zones
 python scripts/calibrate_gaze_zones.py
 ```
 
-![Classification Performance Metrics](evaluation_results/figures/performance_radar.png)
+![Classification Performance Metrics](src/images/performance_radar.png)
 
 ---
 
@@ -122,8 +122,6 @@ python scripts/calibrate_gaze_zones.py
 | 4-5 | 🟡 Hafif | Hafif yorgunluk belirtileri |
 | 6-7 | 🟠 Uyarı | Dikkat dağınıklığı başlangıcı |
 | 8-9 | 🔴 Kritik | Acil müdahale gerekli |
-
-[🎯 **GÖRSEL YERİ:** Metriklerin görsel karşılaştırması - bar chart veya dashboard görünümü]
 
 ---
 
@@ -154,18 +152,6 @@ AB regülasyonu C(2023)4523 uyumlu 9 bölge:
 | 4 | Right Side | Alan 2 | 🟡 Sürüş İlgili |
 | 5 | Rear Mirror | Alan 2 | 🔴 Kritik |
 
-### 📈 **İstatistiksel Analiz**
-```python
-# Gaze istatistikleri
-from src.detection.gaze_statistics import get_gaze_statistics_recorder
-
-recorder = get_gaze_statistics_recorder()
-stats = recorder.get_statistics()
-```
-
-[🎯 **GÖRSEL YERİ:** Gaze zone detection'ın çalışır haldeki ekran görüntüsü]
-
----
 
 ## 🧪 Test ve Değerlendirme
 
@@ -178,7 +164,8 @@ python scripts/scientific_evaluation.py \
   --output_dir evaluation_results/
 ```
 
-[🎯 **GÖRSEL YERİ:** Test sonuçlarını gösteren grafik - accuracy, precision, recall comparisons]
+![Classification Performance Metrics](src/images/error_heatmap.png)
+![Classification Performance Metrics](src/images/category_analysis.png)
 
 ---
 
