@@ -224,3 +224,12 @@ data/*.json
 data/*.npy
 data/*.npz
 data/*.pkl
+
+# Evaluation sonuçları - GUI değerlendirme çıktıları
+evaluation_results/
+evaluation_results/**/*
+**/evaluation_results/
+**/figures/
+scientific_evaluation_report.txt
+detailed_metrics.xlsx
+evaluation_results.json
