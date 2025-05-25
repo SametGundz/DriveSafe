@@ -6,7 +6,7 @@ camera:
   width: 640
   height: 480
   fps: 30
-  device_id: 0
+  device_id: 2
   # ETH-XGaze için kamera kalibrasyonu parametreleri
   # Bunlar varsayılan değerlerdir, kameranıza göre değiştirilmelidir
   matrix: [1000.0, 0.0, 320.0, 0.0, 1000.0, 240.0, 0.0, 0.0, 1.0]  # 3x3 kamera matrisi düzleştirilmiş halde
