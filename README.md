@@ -1,5 +1,4 @@
-# 🚗 Driver Drowsiness Detection System
-## Sürücü Uykululuk Tespit Sistemi
+# 🚗 Real Time Driver Drowsiness and Distraction Detection System
 
 [![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://python.org)
 [![PyQt6](https://img.shields.io/badge/PyQt6-GUI-green.svg)](https://riverbankcomputing.com/software/pyqt/)
@@ -13,84 +12,84 @@
 
 ---
 
-## 🚀 Kurulum
+## 🚀 Installation
 
-### 🔧 1. Gerekli Paketleri Yükleme
+### 🔧 1. Installing Required Packages
 
 ```bash
-# Repository'yi klonlayın
-git clone https://github.com/kullanici-adi/driver-drowsiness.git
+# Clone the repository
+git clone https://github.com/username/driver-drowsiness.git
 cd driver-drowsiness
 
-# Sanal ortam oluşturun (önerilen)
+# Create a virtual environment (recommended)
 python -m venv venv
 
-# Sanal ortamı etkinleştirin
+# Activate the virtual environment
 # Windows:
 venv\Scripts\activate
 # macOS/Linux:
 source venv/bin/activate
 
-# Gerekli paketleri yükleyin
+# Install required packages
 pip install -r requirements.txt
 ```
 
-### 🤖 2. ETH-XGaze Modelini İndirme
+### 🤖 2. Downloading the ETH-XGaze Model
 
-ETH-XGaze modeli büyük boyutta olduğu için repository'de bulunmaz. Aşağıdaki adımları izleyin:
+The ETH-XGaze model is not included in the repository due to its large size. Follow these steps:
 
-#### **Seçenek A: Resmi Model (Önerilen)**
-1. [ETH-XGaze resmi sayfasını](https://ait.ethz.ch/projects/2020/ETH-XGaze/) ziyaret edin
-2. Model dosyasını indirin (`epoch_24_ckpt.pth.tar`)
-3. `models/` klasörüne yerleştirin:
+#### **Option A: Official Model (Recommended)**
+1. Visit the [ETH-XGaze official page](https://ait.ethz.ch/projects/2020/ETH-XGaze/)
+2. Download the model file (`epoch_24_ckpt.pth.tar`)
+3. Place it in the `models/` directory:
    ```bash
    mkdir -p models
-   # İndirilen dosyayi models klasörüne kopyalayın
-   cp /indirme/yolu/epoch_24_ckpt.pth.tar models/eth_xgaze_model.pth
+   # Copy the downloaded file to the models directory
+   cp /download/path/epoch_24_ckpt.pth.tar models/eth_xgaze_model.pth
    ```
 
-#### **Seçenek B: ONNX Formatı (Hızlı Çıkarım)**
+#### **Option B: ONNX Format (Fast Inference)**
 ```bash
-# Model dönüştürme betiğini çalıştırın
+# Run the model conversion script
 python scripts/convert_ethxgaze_model.py models/eth_xgaze_model.pth models/eth_xgaze_model.onnx --export_onnx
 ```
 
 ---
 
-## 💻 Kullanım
+## 💻 Usage
 
-### 🎮 1. Temel Kullanım
+### 🎮 1. Basic Usage
 
 ```bash
-# Ana uygulamayı başlatın
+# Start the main application
 python run.py
 ```
 
-**Kullanım Adımları:**
-1. 🎥 Kameranızın bağlı olduğundan emin olun
-2. ▶️ **"Başlat"** düğmesine tıklayın
-3. 👤 Yüzünüzü kamera görüş alanında tutun
-4. 📊 Gerçek zamanlı metrikleri izleyin
-5. ⏹️ **"Durdur"** ile analizi sonlandırın
+**Usage Steps:**
+1. 🎥 Make sure your camera is connected
+2. ▶️ Click the **"Start"** button
+3. 👤 Keep your face in the camera's field of view
+4. 📊 Monitor real-time metrics
+5. ⏹️ End the analysis with **"Stop"**
 
 
-### 📹 2. Video Analizi
+### 📹 2. Video Analysis
 
 ```bash
-# Video dosyası analizi
+# Video file analysis
 python examples/analyze_video.py --input video.mp4 --output results/
 
-# Toplu video analizi
+# Batch video analysis
 python scripts/batch_analyze.py --input_dir videos/ --output_dir results/
 ```
 ![Video Upload](src/images/video_upload.png)
-### 🎯 3. Gaze Zone Tespiti
+### 🎯 3. Gaze Zone Detection
 
 ```bash
-# Bakış bölgesi testi
+# Gaze zone test
 python tests/test_gaze_zone_detector.py --camera 0 --show_zones
 
-# Gaze zone kalibrasyonu
+# Gaze zone calibration
 python scripts/calibrate_gaze_zones.py
 ```
 
@@ -98,42 +97,42 @@ python scripts/calibrate_gaze_zones.py
 
 ---
 
-## 📊 Bilimsel Metrikler
+## 📊 Scientific Metrics
 
 ### 👁️ **EAR (Eye Aspect Ratio)**
-- **Formül**: `EAR = (|p2-p6| + |p3-p5|) / (2 * |p1-p4|)`
-- **Eşik Değeri**: 0.21 (altında göz kapalı)
-- **Kullanım**: Anlık göz kırpma ve kapalılık tespiti
+- **Formula**: `EAR = (|p2-p6| + |p3-p5|) / (2 * |p1-p4|)`
+- **Threshold Value**: 0.21 (eyes considered closed below this)
+- **Usage**: Instant eye blink and closure detection
 
 ### 👄 **MAR (Mouth Aspect Ratio)**
-- **Formül**: `MAR = |p14-p18| / |p12-p16|`
-- **Eşik Değeri**: 0.65 (üstünde ağız açık)
-- **Kullanım**: Esneme tespiti
+- **Formula**: `MAR = |p14-p18| / |p12-p16|`
+- **Threshold Value**: 0.65 (mouth considered open above this)
+- **Usage**: Yawning detection
 
 ### 💤 **PERCLOS**
-- **Tanım**: 60 saniyelik periyotta göz kapanma yüzdesi
-- **Uyarı Eşiği**: %15
-- **Kritik Eşik**: %20
+- **Definition**: Percentage of eye closure over a 60-second period
+- **Warning Threshold**: 15%
+- **Critical Threshold**: 20%
 
 ### 😴 **KSS (Karolinska Sleepiness Scale)**
-| Puan | Durum | Açıklama |
+| Score | Status | Description |
 |------|-------|----------|
-| 1-3 | 🟢 Normal | Tam uyanık durumda |
-| 4-5 | 🟡 Hafif | Hafif yorgunluk belirtileri |
-| 6-7 | 🟠 Uyarı | Dikkat dağınıklığı başlangıcı |
-| 8-9 | 🔴 Kritik | Acil müdahale gerekli |
+| 1-3 | 🟢 Normal | Fully awake state |
+| 4-5 | 🟡 Mild | Mild signs of fatigue |
+| 6-7 | 🟠 Warning | Beginning of attention deficit |
+| 8-9 | 🔴 Critical | Immediate intervention required |
 
 ---
 
-## 🔬 Gelişmiş Özellikler
+## 🔬 Advanced Features
 
 ### 🎭 **3D Head Pose Visualization**
-- **Real-time 3D Model**: Anlık baş duruşu görselleştirmesi
-- **Pitch/Yaw/Roll**: Üç eksen rotasyon takibi
-- **Interactive Controls**: Kullanıcı kontrollü görünüm ayarları
+- **Real-time 3D Model**: Real-time head pose visualization
+- **Pitch/Yaw/Roll**: Three-axis rotation tracking
+- **Interactive Controls**: User-controlled view settings
 
 ```python
-# 3D model kullanım örneği
+# 3D model usage example
 from src.ui.head_pose_model import Head3DPanel
 
 head_panel = Head3DPanel()
@@ -141,23 +140,23 @@ head_panel.update_pose(pitch=10, yaw=-5, roll=2)
 ```
 
 ### 📍 **Gaze Zone Detection**
-AB regülasyonu C(2023)4523 uyumlu 9 bölge:
+EU regulation C(2023)4523 compliant 9 zones:
 
-| Zone ID | Bölge Adı | Alan | Kritiklik |
+| Zone ID | Zone Name | Area | Criticality |
 |---------|-----------|------|-----------|
-| 0 | Road Center | Alan 2 | 🔴 Kritik |
-| 1 | Driving Instruments | Alan 2 | 🟡 Sürüş İlgili |
-| 2 | Infotainment | Alan 1 | 🟠 Sürüş Dışı |
-| 3 | Left Side | Alan 2 | 🟡 Sürüş İlgili |
-| 4 | Right Side | Alan 2 | 🟡 Sürüş İlgili |
-| 5 | Rear Mirror | Alan 2 | 🔴 Kritik |
+| 0 | Road Center | Area 2 | 🔴 Critical |
+| 1 | Driving Instruments | Area 2 | 🟡 Driving Related |
+| 2 | Infotainment | Area 1 | 🟠 Non-Driving |
+| 3 | Left Side | Area 2 | 🟡 Driving Related |
+| 4 | Right Side | Area 2 | 🟡 Driving Related |
+| 5 | Rear Mirror | Area 2 | 🔴 Critical |
 
 
-## 🧪 Test ve Değerlendirme
+## 🧪 Testing and Evaluation
 
-### 🔬 **Bilimsel Değerlendirme**
+### 🔬 **Scientific Evaluation**
 ```bash
-# Precision/Recall analizi
+# Precision/Recall analysis
 python scripts/scientific_evaluation.py \
   --ground_truth data/gt.json \
   --predictions data/pred.json \
@@ -169,7 +168,7 @@ python scripts/scientific_evaluation.py \
 
 ---
 
-## 🔬 **Bilimsel Kaynaklar**
+## 🔬 **Scientific References**
 - **ETH-XGaze**: Gaze estimation model ([Paper](https://arxiv.org/abs/2007.15837))
 - **MediaPipe**: Face mesh detection ([Documentation](https://google.github.io/mediapipe/))
 
