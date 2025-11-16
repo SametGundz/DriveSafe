@@ -1,4 +1,4 @@
-# 🚗 Real Time Driver Drowsiness and Distraction Detection System
+# Real Time Driver Drowsiness and Distraction Detection System
 
 [![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://python.org)
 [![PyQt6](https://img.shields.io/badge/PyQt6-GUI-green.svg)](https://riverbankcomputing.com/software/pyqt/)
@@ -12,9 +12,9 @@
 
 ---
 
-## 🚀 Installation
+## Installation
 
-### 🔧 1. Installing Required Packages
+### 1. Installing Required Packages
 
 ```bash
 # Clone the repository
@@ -34,7 +34,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 🤖 2. Downloading the ETH-XGaze Model
+### 2. Downloading the ETH-XGaze Model
 
 The ETH-XGaze model is not included in the repository due to its large size. Follow these steps:
 
@@ -56,9 +56,9 @@ python scripts/convert_ethxgaze_model.py models/eth_xgaze_model.pth models/eth_x
 
 ---
 
-## 💻 Usage
+## Usage
 
-### 🎮 1. Basic Usage
+### 1. Basic Usage
 
 ```bash
 # Start the main application
@@ -66,14 +66,14 @@ python run.py
 ```
 
 **Usage Steps:**
-1. 🎥 Make sure your camera is connected
-2. ▶️ Click the **"Start"** button
-3. 👤 Keep your face in the camera's field of view
-4. 📊 Monitor real-time metrics
-5. ⏹️ End the analysis with **"Stop"**
+1. Make sure your camera is connected
+2. Click the **"Start"** button
+3. Keep your face in the camera's field of view
+4. Monitor real-time metrics
+5. End the analysis with **"Stop"**
 
 
-### 📹 2. Video Analysis
+### 2. Video Analysis
 
 ```bash
 # Video file analysis
@@ -83,7 +83,7 @@ python examples/analyze_video.py --input video.mp4 --output results/
 python scripts/batch_analyze.py --input_dir videos/ --output_dir results/
 ```
 ![Video Upload](src/images/video_upload.png)
-### 🎯 3. Gaze Zone Detection
+### 3. Gaze Zone Detection
 
 ```bash
 # Gaze zone test
@@ -109,24 +109,24 @@ python scripts/calibrate_gaze_zones.py
 
 ---
 
-## 📊 Scientific Metrics
+## Scientific Metrics
 
-### 👁️ **EAR (Eye Aspect Ratio)**
+### **EAR (Eye Aspect Ratio)**
 - **Formula**: `EAR = (|p2-p6| + |p3-p5|) / (2 * |p1-p4|)`
 - **Threshold Value**: 0.21 (eyes considered closed below this)
 - **Usage**: Instant eye blink and closure detection
 
-### 👄 **MAR (Mouth Aspect Ratio)**
+### **MAR (Mouth Aspect Ratio)**
 - **Formula**: `MAR = |p14-p18| / |p12-p16|`
 - **Threshold Value**: 0.65 (mouth considered open above this)
 - **Usage**: Yawning detection
 
-### 💤 **PERCLOS**
+### **PERCLOS**
 - **Definition**: Percentage of eye closure over a 60-second period
 - **Warning Threshold**: 15%
 - **Critical Threshold**: 20%
 
-### 😴 **KSS (Karolinska Sleepiness Scale)**
+### **KSS (Karolinska Sleepiness Scale)**
 | Score | Status | Description |
 |------|-------|----------|
 | 1-3 | 🟢 Normal | Fully awake state |
@@ -136,9 +136,9 @@ python scripts/calibrate_gaze_zones.py
 
 ---
 
-## 🔬 Advanced Features
+## Advanced Features
 
-### 🎭 **3D Head Pose Visualization**
+### **3D Head Pose Visualization**
 - **Real-time 3D Model**: Real-time head pose visualization
 - **Pitch/Yaw/Roll**: Three-axis rotation tracking
 - **Interactive Controls**: User-controlled view settings
@@ -151,7 +151,7 @@ head_panel = Head3DPanel()
 head_panel.update_pose(pitch=10, yaw=-5, roll=2)
 ```
 
-### 📍 **Gaze Zone Detection**
+### **Gaze Zone Detection**
 EU regulation C(2023)4523 compliant 9 zones:
 
 | Zone ID | Zone Name | Area | Criticality |
@@ -162,39 +162,9 @@ EU regulation C(2023)4523 compliant 9 zones:
 | 3 | Left Side | Area 2 | 🟡 Driving Related |
 | 4 | Right Side | Area 2 | 🟡 Driving Related |
 | 5 | Rear Mirror | Area 2 | 🔴 Critical |
-
-
-## 🧪 Testing and Evaluation
-
-### 🔬 **Scientific Evaluation**
-```bash
-# Precision/Recall analysis
-python scripts/scientific_evaluation.py \
-  --ground_truth data/gt.json \
-  --predictions data/pred.json \
-  --output_dir evaluation_results/
-```
-
-![Classification Performance Metrics](src/images/error_heatmap.png)
-
-##### Most Frequent Confusion Pairs:
-- Zones 4↔5: 36 errors (2.32%)
-- Zones 1↔2: 21 errors (1.35%)
-- Zones 2↔4: 14 errors (0.90%)
-
-![Classification Performance Metrics](src/images/category_analysis.png)
-
-#### Critical Zone Performance:
-- Critical Zone Accuracy: 85.82%
-- Safety Impact Score: 14.18%
-
-#### CONCLUSIONS AND RECOMMENDATIONS
-- Excellent classification performance achieved (>90% accuracy)
-- Almost perfect inter-rater agreement demonstrated
-
 ---
 
-## 🔬 **Scientific References**
+## **Scientific References**
 - **ETH-XGaze**: Gaze estimation model ([Paper](https://arxiv.org/abs/2007.15837))
 - **MediaPipe**: Face mesh detection ([Documentation](https://google.github.io/mediapipe/))
 
