@@ -82,6 +82,9 @@ python examples/analyze_video.py --input video.mp4 --output results/
 # Batch video analysis
 python scripts/batch_analyze.py --input_dir videos/ --output_dir results/
 ```
+
+You can use the feature either command line or application.
+
 ![Video Upload](src/images/video_upload.png)
 ### 3. Gaze Zone Detection
 
@@ -92,6 +95,17 @@ python tests/test_gaze_zone_detector.py --camera 0 --show_zones
 # Gaze zone calibration
 python scripts/calibrate_gaze_zones.py
 ```
+
+EU regulation C(2023)4523 compliant zones:
+
+| Zone ID | Zone Name | Area | Criticality |
+|---------|-----------|------|-----------|
+| 0 | Road Center | Area 2 | 🔴 Critical |
+| 1 | Driving Instruments | Area 2 | 🟡 Driving Related |
+| 2 | Infotainment | Area 1 | 🟠 Non-Driving |
+| 3 | Left Side | Area 2 | 🟡 Driving Related |
+| 4 | Right Side | Area 2 | 🟡 Driving Related |
+| 5 | Rear Mirror | Area 2 | 🔴 Critical |
 
 ![Classification Performance Metrics](src/images/performance_radar.png)
 
@@ -109,7 +123,7 @@ python scripts/calibrate_gaze_zones.py
 
 ---
 
-## Scientific Metrics
+## Metrics
 
 ### **EAR (Eye Aspect Ratio)**
 - **Formula**: `EAR = (|p2-p6| + |p3-p5|) / (2 * |p1-p4|)`
@@ -136,36 +150,6 @@ python scripts/calibrate_gaze_zones.py
 
 ---
 
-## Advanced Features
-
-### **3D Head Pose Visualization**
-- **Real-time 3D Model**: Real-time head pose visualization
-- **Pitch/Yaw/Roll**: Three-axis rotation tracking
-- **Interactive Controls**: User-controlled view settings
-
-```python
-# 3D model usage example
-from src.ui.head_pose_model import Head3DPanel
-
-head_panel = Head3DPanel()
-head_panel.update_pose(pitch=10, yaw=-5, roll=2)
-```
-
-### **Gaze Zone Detection**
-EU regulation C(2023)4523 compliant 9 zones:
-
-| Zone ID | Zone Name | Area | Criticality |
-|---------|-----------|------|-----------|
-| 0 | Road Center | Area 2 | 🔴 Critical |
-| 1 | Driving Instruments | Area 2 | 🟡 Driving Related |
-| 2 | Infotainment | Area 1 | 🟠 Non-Driving |
-| 3 | Left Side | Area 2 | 🟡 Driving Related |
-| 4 | Right Side | Area 2 | 🟡 Driving Related |
-| 5 | Rear Mirror | Area 2 | 🔴 Critical |
----
-
 ## **Scientific References**
 - **ETH-XGaze**: Gaze estimation model ([Paper](https://arxiv.org/abs/2007.15837))
 - **MediaPipe**: Face mesh detection ([Documentation](https://google.github.io/mediapipe/))
-
----
